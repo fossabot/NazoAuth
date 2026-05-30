@@ -55,10 +55,6 @@ pub(crate) async fn token_refresh(
             "refresh_token 无效.",
         );
     };
-    let dpop_jkt = match validate_dpop_proof(state, req, None, token.dpop_jkt.as_deref()).await {
-        Ok(value) => token.dpop_jkt.clone().or(value),
-        Err(error) => return dpop_error_response(error),
-    };
     if token.client_id != client.id || token.expires_at <= Utc::now() || token.revoked_at.is_some()
     {
         mark_token_family_reuse(state, token.token_family_id).await;
@@ -68,6 +64,17 @@ pub(crate) async fn token_refresh(
             "refresh_token 无效或已撤销.",
         );
     }
+    let dpop_jkt = if let Some(expected_jkt) = token.dpop_jkt.clone() {
+        match validate_dpop_proof(state, req, None, Some(&expected_jkt)).await {
+            Ok(_) => Some(expected_jkt),
+            Err(error) => return dpop_error_response(error),
+        }
+    } else {
+        if dpop_proof_present(req) {
+            return dpop_error_response(DpopError::TokenNotBound);
+        }
+        None
+    };
     let rotated = match get_conn(&state.diesel_db).await {
         Ok(mut conn) => diesel::update(
             oauth_tokens::table

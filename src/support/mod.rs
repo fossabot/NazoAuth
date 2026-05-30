@@ -47,7 +47,7 @@ pub(crate) mod prelude {
     pub(crate) use diesel_async::RunQueryDsl;
     pub(crate) use ed25519_dalek::SigningKey;
     pub(crate) use fred::prelude::{
-        Client as ValkeyClient, Error as ValkeyError, Expiration, KeysInterface,
+        Client as ValkeyClient, Error as ValkeyError, Expiration, KeysInterface, SetOptions,
     };
     pub(crate) use password_hash::{SaltString, rand_core::OsRng};
     pub(crate) use serde::Serialize;

@@ -4,9 +4,11 @@ use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use serde::Deserialize;
 
 use super::prelude::*;
-use super::{oauth_error, valkey_set_ex};
+use super::{oauth_error, valkey_set_ex_nx};
 
 const DPOP_TTL_SECONDS: i64 = 300;
+const DPOP_CLOCK_SKEW_SECONDS: i64 = 30;
+const MAX_DPOP_JTI_BYTES: usize = 128;
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum AccessTokenAuthScheme {
@@ -21,6 +23,7 @@ pub(crate) enum DpopError {
     InvalidProof,
     ReplayDetected,
     BindingMismatch,
+    TokenNotBound,
 }
 
 #[derive(Deserialize)]
@@ -46,6 +49,7 @@ pub(crate) fn dpop_error_response(error: DpopError) -> HttpResponse {
         DpopError::InvalidProof => "DPoP proof validation failed.",
         DpopError::ReplayDetected => "DPoP proof jti has already been used.",
         DpopError::BindingMismatch => "DPoP binding mismatch.",
+        DpopError::TokenNotBound => "Token is not DPoP-bound.",
     };
     let mut response = oauth_error(
         if matches!(error, DpopError::MissingProof) {
@@ -63,13 +67,27 @@ pub(crate) fn dpop_error_response(error: DpopError) -> HttpResponse {
     response
 }
 
-pub(crate) fn authorization_access_token(headers: &HeaderMap) -> Option<(AccessTokenAuthScheme, String)> {
+pub(crate) fn authorization_access_token(
+    headers: &HeaderMap,
+) -> Option<(AccessTokenAuthScheme, String)> {
     let raw = headers.get(header::AUTHORIZATION)?.to_str().ok()?;
-    if let Some(value) = raw.strip_prefix("DPoP ") {
-        return Some((AccessTokenAuthScheme::DPoP, value.to_owned()));
+    let mut parts = raw.splitn(2, char::is_whitespace);
+    let scheme = parts.next()?.trim();
+    let token = parts.next()?.trim();
+    if token.is_empty() || token.split_whitespace().count() != 1 {
+        return None;
     }
-    raw.strip_prefix("Bearer ")
-        .map(|value| (AccessTokenAuthScheme::Bearer, value.to_owned()))
+    if scheme.eq_ignore_ascii_case("DPoP") {
+        return Some((AccessTokenAuthScheme::DPoP, token.to_owned()));
+    }
+    if scheme.eq_ignore_ascii_case("Bearer") {
+        return Some((AccessTokenAuthScheme::Bearer, token.to_owned()));
+    }
+    None
+}
+
+pub(crate) fn dpop_proof_present(req: &HttpRequest) -> bool {
+    dpop_proof_header(req).is_some()
 }
 
 pub(crate) async fn validate_dpop_proof(
@@ -78,14 +96,12 @@ pub(crate) async fn validate_dpop_proof(
     token_for_ath: Option<&str>,
     expected_jkt: Option<&str>,
 ) -> Result<Option<String>, DpopError> {
-    let Some(raw) = req
-        .headers()
-        .get(header::HeaderName::from_static("dpop"))
-        .and_then(|value| value.to_str().ok())
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    else {
-        return if expected_jkt.is_some() { Err(DpopError::MissingProof) } else { Ok(None) };
+    let Some(raw) = dpop_proof_header(req) else {
+        return if expected_jkt.is_some() {
+            Err(DpopError::MissingProof)
+        } else {
+            Ok(None)
+        };
     };
 
     let (header, claims, signing_input, signature) = decode_proof(raw)?;
@@ -112,8 +128,7 @@ pub(crate) async fn validate_dpop_proof(
     if actual_htu != expected_htu || !claims.htm.eq_ignore_ascii_case(req.method().as_str()) {
         return Err(DpopError::InvalidProof);
     }
-    let now = Utc::now().timestamp();
-    if claims.iat > now + 30 || now - claims.iat > DPOP_TTL_SECONDS || claims.jti.trim().is_empty() {
+    if !dpop_iat_within_window(claims.iat, Utc::now().timestamp()) || !valid_jti(&claims.jti) {
         return Err(DpopError::InvalidProof);
     }
     if let Some(value) = token_for_ath {
@@ -124,17 +139,37 @@ pub(crate) async fn validate_dpop_proof(
     }
 
     let replay_key = format!("oauth:dpop:jti:{jkt}:{}", claims.jti);
-    if valkey_get(&state.valkey, replay_key.clone())
+    if !valkey_set_ex_nx(&state.valkey, replay_key, "1", DPOP_TTL_SECONDS as u64)
         .await
         .map_err(|_| DpopError::InvalidProof)?
-        .is_some()
     {
         return Err(DpopError::ReplayDetected);
     }
-    valkey_set_ex(&state.valkey, replay_key, "1", DPOP_TTL_SECONDS as u64)
-        .await
-        .map_err(|_| DpopError::InvalidProof)?;
     Ok(Some(jkt))
+}
+
+fn dpop_proof_header(req: &HttpRequest) -> Option<&str> {
+    req.headers()
+        .get(header::HeaderName::from_static("dpop"))
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+}
+
+fn dpop_iat_within_window(iat: i64, now: i64) -> bool {
+    if iat > now.saturating_add(DPOP_CLOCK_SKEW_SECONDS) {
+        return false;
+    }
+    if iat > now {
+        return true;
+    }
+    now.checked_sub(iat)
+        .is_some_and(|age| age <= DPOP_TTL_SECONDS)
+}
+
+fn valid_jti(jti: &str) -> bool {
+    let trimmed = jti.trim();
+    !trimmed.is_empty() && trimmed.len() <= MAX_DPOP_JTI_BYTES
 }
 
 fn decode_proof(raw: &str) -> Result<(DpopHeader, DpopClaims, String, Vec<u8>), DpopError> {
@@ -158,7 +193,12 @@ fn decode_proof(raw: &str) -> Result<(DpopHeader, DpopClaims, String, Vec<u8>), 
         .map_err(|_| DpopError::MalformedProof)?;
     let claims = serde_json::from_slice::<DpopClaims>(&payload_bytes)
         .map_err(|_| DpopError::MalformedProof)?;
-    Ok((header, claims, format!("{encoded_header}.{encoded_payload}"), signature))
+    Ok((
+        header,
+        claims,
+        format!("{encoded_header}.{encoded_payload}"),
+        signature,
+    ))
 }
 
 fn jwk_thumbprint(jwk: &Value) -> Result<String, DpopError> {
@@ -193,7 +233,8 @@ fn verify_signature(jwk: &Value, signing_input: &[u8], signature: &[u8]) -> Resu
         .try_into()
         .map_err(|_| DpopError::MalformedProof)?;
     let signature = Signature::from_slice(signature).map_err(|_| DpopError::MalformedProof)?;
-    let verifying_key = VerifyingKey::from_bytes(&key_bytes).map_err(|_| DpopError::MalformedProof)?;
+    let verifying_key =
+        VerifyingKey::from_bytes(&key_bytes).map_err(|_| DpopError::MalformedProof)?;
     verifying_key
         .verify(signing_input, &signature)
         .map_err(|_| DpopError::InvalidProof)
@@ -204,4 +245,57 @@ fn normalize_htu(value: &str) -> Result<String, DpopError> {
     url.set_query(None);
     url.set_fragment(None);
     Ok(url.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn authorization_scheme_is_case_insensitive() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::AUTHORIZATION,
+            HeaderValue::from_static("dpop abc.def"),
+        );
+
+        let Some((scheme, token)) = authorization_access_token(&headers) else {
+            panic!("authorization header should parse");
+        };
+
+        assert!(matches!(scheme, AccessTokenAuthScheme::DPoP));
+        assert_eq!(token, "abc.def");
+    }
+
+    #[test]
+    fn bearer_scheme_is_case_insensitive() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::AUTHORIZATION,
+            HeaderValue::from_static("bearer token"),
+        );
+
+        let Some((scheme, token)) = authorization_access_token(&headers) else {
+            panic!("authorization header should parse");
+        };
+
+        assert!(matches!(scheme, AccessTokenAuthScheme::Bearer));
+        assert_eq!(token, "token");
+    }
+
+    #[test]
+    fn dpop_iat_rejects_extreme_past_without_overflow() {
+        assert!(!dpop_iat_within_window(i64::MIN, 1_000));
+    }
+
+    #[test]
+    fn dpop_iat_allows_clock_skew_but_not_far_future() {
+        let now = 1_000;
+
+        assert!(dpop_iat_within_window(now + DPOP_CLOCK_SKEW_SECONDS, now));
+        assert!(!dpop_iat_within_window(
+            now + DPOP_CLOCK_SKEW_SECONDS + 1,
+            now
+        ));
+    }
 }

@@ -18,6 +18,7 @@ pub(crate) struct Settings {
     pub(crate) refresh_token_ttl_seconds: i64,
     pub(crate) avatar_max_bytes: usize,
     pub(crate) client_delivery_ttl_seconds: u64,
+    pub(crate) email_code_dev_response_enabled: bool,
     pub(crate) avatar_storage_dir: PathBuf,
     pub(crate) jwk_keys_dir: PathBuf,
 }
@@ -75,6 +76,9 @@ impl Settings {
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(86_400),
+            email_code_dev_response_enabled: env::var("EMAIL_CODE_DEV_RESPONSE_ENABLED")
+                .ok()
+                .is_some_and(|value| value == "1" || value.eq_ignore_ascii_case("true")),
             avatar_storage_dir: env::var("AVATAR_STORAGE_DIR")
                 .map(PathBuf::from)
                 .unwrap_or_else(|_| PathBuf::from("runtime/avatars")),

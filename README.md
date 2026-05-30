@@ -84,6 +84,7 @@ Nazo OAuth Server 是一个基于 Actix Web 的 OAuth/OIDC 服务，提供用户
 | `REFRESH_TOKEN_TTL_SECONDS` | `2592000` | refresh token 有效期，单位为秒 |
 | `AVATAR_MAX_BYTES` | `2097152` | 头像最大字节数 |
 | `CLIENT_DELIVERY_TTL_SECONDS` | `86400` | 客户端接入信息投递有效期，单位为秒 |
+| `EMAIL_CODE_DEV_RESPONSE_ENABLED` | `false` | 仅 debug 构建可用；启用后 `/auth/send-code` 响应包含注册验证码，便于本地开发 |
 | `AVATAR_STORAGE_DIR` | `runtime/avatars` | 头像存储目录 |
 | `JWK_KEYS_DIR` | `runtime/keys` | Ed25519 keyset 存储目录 |
 

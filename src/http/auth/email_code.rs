@@ -39,10 +39,11 @@ pub(crate) async fn send_code(
         );
     }
 
-    // TODO: 接入正式邮件投递服务后在这里发送验证码。
-    // 当前只记录到 debug 日志，避免 HTTP 响应泄露验证码。
-    tracing::debug!(email = %email, verification_code = %code, "generated registration verification code");
-    json_response(json!({"success": true, "message": "如果邮箱尚未注册，验证码将会发送。"}))
+    let mut body = json!({"success": true, "message": "如果邮箱尚未注册，验证码将会发送。"});
+    if cfg!(debug_assertions) && state.settings.email_code_dev_response_enabled {
+        body["verification_code"] = json!(code);
+    }
+    json_response(body)
 }
 
 fn random_numeric_code() -> String {

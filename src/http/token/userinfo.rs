@@ -13,15 +13,27 @@ pub(crate) async fn userinfo(state: Data<AppState>, req: HttpRequest) -> HttpRes
             "访问令牌无效或已过期.",
         );
     };
-    if let Some(cnf) = claims.cnf.as_ref() {
-        if !matches!(scheme, AccessTokenAuthScheme::DPoP) {
+    match (scheme, claims.cnf.as_ref()) {
+        (AccessTokenAuthScheme::DPoP, Some(cnf)) => {
+            if let Err(error) =
+                validate_dpop_proof(&state, &req, Some(&token), Some(&cnf.jkt)).await
+            {
+                return dpop_error_response(error);
+            }
+        }
+        (AccessTokenAuthScheme::DPoP, None) => {
+            return dpop_error_response(DpopError::TokenNotBound);
+        }
+        (AccessTokenAuthScheme::Bearer, Some(_)) => {
             return dpop_error_response(DpopError::MissingProof);
         }
-        if let Err(error) = validate_dpop_proof(&state, &req, Some(&token), Some(&cnf.jkt)).await {
-            return dpop_error_response(error);
-        }
+        (AccessTokenAuthScheme::Bearer, None) => {}
     }
-    if !claims.scope.split_whitespace().any(|scope| scope == "openid") {
+    if !claims
+        .scope
+        .split_whitespace()
+        .any(|scope| scope == "openid")
+    {
         return oauth_bearer_error(
             StatusCode::FORBIDDEN,
             "insufficient_scope",

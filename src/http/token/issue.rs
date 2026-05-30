@@ -10,17 +10,19 @@ pub(crate) async fn issue_token_response(
     let now = Utc::now();
     let access_token = match make_jwt(
         state,
-        &issue.subject,
-        if issue.user_id.is_some() {
-            "user"
-        } else {
-            "client"
+        AccessTokenJwtInput {
+            subject: &issue.subject,
+            subject_type: if issue.user_id.is_some() {
+                "user"
+            } else {
+                "client"
+            },
+            client_id: &client.client_id,
+            audience: &issue.audience,
+            scopes: &issue.scopes,
+            ttl: state.settings.access_token_ttl_seconds,
+            dpop_jkt: issue.dpop_jkt.as_deref(),
         },
-        &client.client_id,
-        &issue.audience,
-        &issue.scopes,
-        state.settings.access_token_ttl_seconds,
-        issue.dpop_jkt.as_deref(),
     ) {
         Ok(v) => v,
         Err(_) => {
