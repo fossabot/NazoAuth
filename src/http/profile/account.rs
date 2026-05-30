@@ -1,0 +1,58 @@
+//! 当前用户资料接口。
+// 只处理 /auth/me 的读取和基础资料更新。
+use crate::http::prelude::*;
+
+pub(crate) async fn me(state: Data<AppState>, req: HttpRequest) -> HttpResponse {
+    let Some(user) = current_user(&state, &req).await else {
+        return login_required_response(&state);
+    };
+    json_response(auth_me_json(&state, &user).await)
+}
+
+#[derive(Deserialize)]
+pub(crate) struct UpdateProfileRequest {
+    display_name: Option<String>,
+}
+
+pub(crate) async fn update_me(
+    state: Data<AppState>,
+    req: HttpRequest,
+    Json(payload): Json<UpdateProfileRequest>,
+) -> HttpResponse {
+    if !has_valid_csrf_token(&state, &req, None) {
+        return csrf_error();
+    }
+    let Some(user) = current_user(&state, &req).await else {
+        return login_required_response(&state);
+    };
+    let display_name = payload
+        .display_name
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty());
+    let mut conn = match get_conn(&state.diesel_db).await {
+        Ok(conn) => conn,
+        Err(_) => {
+            return oauth_error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "server_error",
+                "数据库连接失败.",
+            );
+        }
+    };
+    let updated = diesel::update(users::table.find(user.id))
+        .set((
+            users::display_name.eq(display_name),
+            users::updated_at.eq(diesel_now),
+        ))
+        .returning(UserRow::as_returning())
+        .get_result::<UserRow>(&mut conn)
+        .await;
+    match updated {
+        Ok(user) => json_response(auth_me_json(&state, &user).await),
+        Err(_) => oauth_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "server_error",
+            "资料更新失败.",
+        ),
+    }
+}

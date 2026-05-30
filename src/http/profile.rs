@@ -1,0 +1,15 @@
+//! 当前用户 HTTP handler 聚合模块。
+// 子模块按 /auth/me 下的资源职责拆分，路由层通过本模块 re-export。
+mod access_requests;
+mod account;
+mod applications;
+mod avatar;
+mod delivery;
+mod session;
+
+pub(crate) use access_requests::*;
+pub(crate) use account::*;
+pub(crate) use applications::*;
+pub(crate) use avatar::*;
+pub(crate) use delivery::*;
+pub(crate) use session::*;

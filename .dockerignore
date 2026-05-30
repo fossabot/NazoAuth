@@ -1,0 +1,16 @@
+# Git metadata is not needed inside image builds.
+.git/
+
+# Build and runtime output should never enter the Docker context.
+target/
+runtime/
+
+# Local-only environment and editor files.
+.env
+.env.*
+.idea/
+.vscode/
+*.swp
+*.swo
+Thumbs.db
+Desktop.ini

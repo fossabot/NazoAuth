@@ -1,0 +1,46 @@
+[package]
+name = "nazo-oauth-server"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "nazo-oauth-server"
+path = "src/main.rs"
+
+[[bin]]
+name = "nazo-oauth-migrate"
+path = "src/bin/nazo_oauth_migrate.rs"
+
+[dependencies]
+actix-cors = "0.7.1"
+actix-multipart = "0.7.2"
+actix-web = { version = "4.13.0", features = ["cookies"] }
+anyhow = "1.0.102"
+argon2 = "0.5.3"
+base64 = "0.22.1"
+blake3 = "1.8.5"
+chrono = { version = "0.4.44", features = ["serde"] }
+diesel = { version = "2.3.9", features = ["postgres", "uuid", "chrono", "serde_json"] }
+diesel-async = { version = "0.9.0", features = ["postgres", "deadpool"] }
+diesel_migrations = "2.3.2"
+ed25519-dalek = "2.2"
+fred = "10.1.0"
+futures-util = "0.3.32"
+jsonwebtoken = { version = "10.4.0", features = ["rust_crypto"] }
+password-hash = { version = "0.5", features = ["rand_core"] }
+rand = "0.9.4"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.150"
+sha2 = "0.10.9"
+tokio = { version = "1.52.3", features = ["full"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+url = "2.5.8"
+urlencoding = "2.1.3"
+uuid = { version = "1.23.2", features = ["v7", "serde"] }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+panic = "abort"

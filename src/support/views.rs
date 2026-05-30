@@ -1,0 +1,93 @@
+//! JSON view 组装函数。
+// 将数据库行转换为前端和管理端直接消费的 JSON 形状。
+
+use super::prelude::*;
+
+pub(crate) async fn auth_me_json(state: &AppState, user: &UserRow) -> Value {
+    let count = match get_conn(&state.diesel_db).await {
+        Ok(mut conn) => user_client_grants::table
+            .filter(user_client_grants::user_id.eq(user.id))
+            .select(count(user_client_grants::client_id).aggregate_distinct())
+            .first::<i64>(&mut conn)
+            .await
+            .unwrap_or(0),
+        Err(_) => 0,
+    };
+    let avatar_url = read_avatar_version(state, user.id)
+        .await
+        .map(|version| format!("/auth/me/avatar?v={version}"));
+    json!({
+        "id": user.id,
+        "email": user.email,
+        "display_name": user.display_name,
+        "avatar_url": avatar_url,
+        "role": user.role,
+        "admin_level": user.admin_level,
+        "authorized_app_count": count
+    })
+}
+
+pub(crate) fn is_cross_site_fetch(headers: &HeaderMap) -> bool {
+    headers
+        .get("sec-fetch-site")
+        .and_then(|value| value.to_str().ok())
+        .map(|value| value.trim().eq_ignore_ascii_case("cross-site"))
+        .unwrap_or(false)
+}
+
+pub(crate) fn admin_user_json(user: UserRow) -> Value {
+    json!({
+        "id": user.id,
+        "email": user.email,
+        "display_name": user.display_name,
+        "is_active": user.is_active,
+        "role": user.role,
+        "admin_level": user.admin_level,
+        "created_at": user.created_at
+    })
+}
+
+pub(crate) fn client_json(client: ClientRow) -> Value {
+    json!({
+        "client_id": client.client_id,
+        "client_name": client.client_name,
+        "client_type": client.client_type,
+        "redirect_uris": json_array_to_strings(&client.redirect_uris),
+        "scopes": json_array_to_strings(&client.scopes),
+        "allowed_audiences": json_array_to_strings(&client.allowed_audiences),
+        "grant_types": json_array_to_strings(&client.grant_types),
+        "token_endpoint_auth_method": client.token_endpoint_auth_method,
+        "is_active": client.is_active
+    })
+}
+
+pub(crate) fn pagination(q: &HashMap<String, String>) -> (i32, i32, i32) {
+    let page = q
+        .get("page")
+        .and_then(|v| v.parse().ok())
+        .filter(|v| *v > 0)
+        .unwrap_or(1);
+    let page_size = q
+        .get("page_size")
+        .and_then(|v| v.parse().ok())
+        .filter(|v| *v > 0)
+        .unwrap_or(20)
+        .min(100);
+    let offset = (page - 1) * page_size;
+    (page, page_size, offset)
+}
+
+pub(crate) fn append_query(base: &str, pairs: &[(&str, &str)]) -> String {
+    let Ok(mut url) = url::Url::parse(base) else {
+        return base.to_owned();
+    };
+    {
+        let mut qp = url.query_pairs_mut();
+        for (k, v) in pairs {
+            if !v.is_empty() {
+                qp.append_pair(k, v);
+            }
+        }
+    }
+    url.to_string()
+}

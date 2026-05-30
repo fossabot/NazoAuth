@@ -1,0 +1,23 @@
+# Rust build output
+/target/
+
+# Local runtime data created by Docker and development runs
+/runtime/
+
+# Local environment overrides
+.env
+.env.*
+!.env.example
+
+# Editor and operating-system metadata
+.idea/
+.vscode/
+*.swp
+*.swo
+Thumbs.db
+Desktop.ini
+
+# Local benchmark and profiling artifacts
+*.profraw
+*.profdata
+flamegraph.svg
