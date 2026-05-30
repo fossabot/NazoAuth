@@ -41,11 +41,17 @@ pub(crate) async fn userinfo(state: Data<AppState>, req: HttpRequest) -> HttpRes
         );
     }
     let preferred_username = match Uuid::parse_str(&claims.sub) {
-        Ok(user_id) => find_user_by_id(&state.diesel_db, user_id)
-            .await
-            .ok()
-            .flatten()
-            .map(|user| user.email),
+        Ok(user_id) => match find_user_by_id(&state.diesel_db, user_id).await {
+            Ok(user) => user.map(|user| user.email),
+            Err(error) => {
+                tracing::warn!(%error, "failed to load userinfo subject");
+                return oauth_bearer_error(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "server_error",
+                    "userinfo 查询失败.",
+                );
+            }
+        },
         Err(_) => None,
     };
     json_response(json!({

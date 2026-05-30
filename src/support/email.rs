@@ -22,18 +22,19 @@ pub(crate) struct EmailRecipient {
 }
 
 pub(crate) fn normalize_email_address(raw: &str) -> anyhow::Result<String> {
+    Ok(parse_email_address(raw)?.to_string())
+}
+
+fn parse_email_address(raw: &str) -> anyhow::Result<Address> {
     let normalized = raw.trim().to_ascii_lowercase();
-    let address = normalized
+    normalized
         .parse::<Address>()
-        .context("email address is invalid")?;
-    Ok(address.to_string())
+        .context("email address is invalid")
 }
 
 pub(crate) fn parse_email_recipient(raw: &str) -> anyhow::Result<EmailRecipient> {
-    let normalized = normalize_email_address(raw)?;
-    let address = normalized
-        .parse::<Address>()
-        .context("email address is invalid")?;
+    let address = parse_email_address(raw)?;
+    let normalized = address.to_string();
     Ok(EmailRecipient {
         normalized,
         mailbox: Mailbox::new(None, address),

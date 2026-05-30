@@ -35,6 +35,7 @@ pub(crate) struct EmailSettings {
     pub(crate) delivery: EmailDelivery,
     pub(crate) code_ttl_seconds: u64,
     pub(crate) send_cooldown_seconds: u64,
+    pub(crate) send_peer_cooldown_seconds: u64,
 }
 
 #[derive(Clone)]
@@ -116,6 +117,7 @@ impl EmailSettings {
             delivery,
             code_ttl_seconds: config.parse("EMAIL_CODE_TTL_SECONDS", 900)?,
             send_cooldown_seconds: config.parse("EMAIL_CODE_SEND_COOLDOWN_SECONDS", 60)?,
+            send_peer_cooldown_seconds: config.parse("EMAIL_CODE_PEER_COOLDOWN_SECONDS", 5)?,
         })
     }
 }

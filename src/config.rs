@@ -81,12 +81,8 @@ impl ConfigSource {
 
     fn merge_yaml_file(&mut self, path: impl AsRef<Path>) -> anyhow::Result<()> {
         let path = path.as_ref();
-        if !path.exists() {
-            return Ok(());
-        }
-
-        let file =
-            File::open(path).with_context(|| format!("failed to read {}", path.display()))?;
+        let file = File::open(path)
+            .with_context(|| format!("failed to read required {}", path.display()))?;
         let value = yaml_serde::from_reader::<_, YamlValue>(file)
             .with_context(|| format!("failed to parse {}", path.display()))?;
         let YamlValue::Mapping(values) = value else {
@@ -180,6 +176,23 @@ mod tests {
         ));
         std::fs::create_dir_all(&path).unwrap();
         std::fs::write(path.join(".env"), "BIND=127.0.0.1:8000\n").unwrap();
+
+        let result = ConfigSource::load_from_dir(&path);
+        let _ = std::fs::remove_dir_all(&path);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn missing_config_file_is_rejected() {
+        let path = std::env::temp_dir().join(format!(
+            "nazo_config_missing_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&path).unwrap();
 
         let result = ConfigSource::load_from_dir(&path);
         let _ = std::fs::remove_dir_all(&path);

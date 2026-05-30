@@ -118,25 +118,13 @@ pub(crate) async fn validate_dpop_proof(
         return Err(DpopError::BindingMismatch);
     }
     verify_signature(&header.jwk, signing_input.as_bytes(), &signature)?;
-
-    let expected_htu = format!(
-        "{}{}",
-        state.settings.issuer.trim_end_matches('/'),
-        req.uri().path()
-    );
-    let actual_htu = normalize_htu(&claims.htu)?;
-    if actual_htu != expected_htu || !claims.htm.eq_ignore_ascii_case(req.method().as_str()) {
-        return Err(DpopError::InvalidProof);
-    }
-    if !dpop_iat_within_window(claims.iat, Utc::now().timestamp()) || !valid_jti(&claims.jti) {
-        return Err(DpopError::InvalidProof);
-    }
-    if let Some(value) = token_for_ath {
-        let expected_ath = URL_SAFE_NO_PAD.encode(Sha256::digest(value.as_bytes()));
-        if claims.ath.as_deref() != Some(expected_ath.as_str()) {
-            return Err(DpopError::InvalidProof);
-        }
-    }
+    validate_dpop_claims(
+        &state.settings.issuer,
+        req.method().as_str(),
+        req.uri().path(),
+        &claims,
+        token_for_ath,
+    )?;
 
     let replay_key = format!("oauth:dpop:jti:{jkt}:{}", claims.jti);
     if !valkey_set_ex_nx(&state.valkey, replay_key, "1", DPOP_TTL_SECONDS as u64)
@@ -165,6 +153,30 @@ fn dpop_iat_within_window(iat: i64, now: i64) -> bool {
     }
     now.checked_sub(iat)
         .is_some_and(|age| age <= DPOP_TTL_SECONDS)
+}
+
+fn validate_dpop_claims(
+    issuer: &str,
+    method: &str,
+    path: &str,
+    claims: &DpopClaims,
+    token_for_ath: Option<&str>,
+) -> Result<(), DpopError> {
+    let expected_htu = format!("{}{}", issuer.trim_end_matches('/'), path);
+    let actual_htu = normalize_htu(&claims.htu)?;
+    if actual_htu != expected_htu || !claims.htm.eq_ignore_ascii_case(method) {
+        return Err(DpopError::InvalidProof);
+    }
+    if !dpop_iat_within_window(claims.iat, Utc::now().timestamp()) || !valid_jti(&claims.jti) {
+        return Err(DpopError::InvalidProof);
+    }
+    if let Some(value) = token_for_ath {
+        let expected_ath = URL_SAFE_NO_PAD.encode(Sha256::digest(value.as_bytes()));
+        if claims.ath.as_deref() != Some(expected_ath.as_str()) {
+            return Err(DpopError::InvalidProof);
+        }
+    }
+    Ok(())
 }
 
 fn valid_jti(jti: &str) -> bool {
@@ -250,6 +262,7 @@ fn normalize_htu(value: &str) -> Result<String, DpopError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ed25519_dalek::{Signer, SigningKey};
 
     #[test]
     fn authorization_scheme_is_case_insensitive() {
@@ -297,5 +310,104 @@ mod tests {
             now + DPOP_CLOCK_SKEW_SECONDS + 1,
             now
         ));
+    }
+
+    #[test]
+    fn signed_dpop_proof_verifies_signature_thumbprint_and_claims() {
+        let signing_key = SigningKey::from_bytes(&[7u8; 32]);
+        let access_token = "access.token.value";
+        let proof = signed_test_proof(
+            &signing_key,
+            "POST",
+            "https://issuer.example/token?ignored=true",
+            Utc::now().timestamp(),
+            "proof-1",
+            Some(access_token),
+        );
+
+        let (header, claims, signing_input, signature) = decode_proof(&proof).unwrap();
+        verify_signature(&header.jwk, signing_input.as_bytes(), &signature).unwrap();
+        assert!(!jwk_thumbprint(&header.jwk).unwrap().is_empty());
+        validate_dpop_claims(
+            "https://issuer.example",
+            "POST",
+            "/token",
+            &claims,
+            Some(access_token),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn dpop_claim_validation_rejects_wrong_method_htu_and_ath() {
+        let signing_key = SigningKey::from_bytes(&[9u8; 32]);
+        let proof = signed_test_proof(
+            &signing_key,
+            "POST",
+            "https://issuer.example/token",
+            Utc::now().timestamp(),
+            "proof-2",
+            Some("bound-token"),
+        );
+        let (_, claims, _, _) = decode_proof(&proof).unwrap();
+
+        assert!(matches!(
+            validate_dpop_claims("https://issuer.example", "GET", "/token", &claims, None),
+            Err(DpopError::InvalidProof)
+        ));
+        assert!(matches!(
+            validate_dpop_claims("https://issuer.example", "POST", "/userinfo", &claims, None),
+            Err(DpopError::InvalidProof)
+        ));
+        assert!(matches!(
+            validate_dpop_claims(
+                "https://issuer.example",
+                "POST",
+                "/token",
+                &claims,
+                Some("other-token")
+            ),
+            Err(DpopError::InvalidProof)
+        ));
+    }
+
+    fn signed_test_proof(
+        signing_key: &SigningKey,
+        method: &str,
+        htu: &str,
+        iat: i64,
+        jti: &str,
+        token_for_ath: Option<&str>,
+    ) -> String {
+        let public_key = URL_SAFE_NO_PAD.encode(signing_key.verifying_key().to_bytes());
+        let header = json!({
+            "typ": "dpop+jwt",
+            "alg": "EdDSA",
+            "jwk": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": public_key
+            }
+        });
+        let mut claims = json!({
+            "htm": method,
+            "htu": htu,
+            "iat": iat,
+            "jti": jti
+        });
+        if let Some(token) = token_for_ath {
+            claims["ath"] = json!(URL_SAFE_NO_PAD.encode(Sha256::digest(token.as_bytes())));
+        }
+
+        let encoded_header = URL_SAFE_NO_PAD.encode(serde_json::to_vec(&header).unwrap());
+        let encoded_claims = URL_SAFE_NO_PAD.encode(serde_json::to_vec(&claims).unwrap());
+        let signing_input = format!("{encoded_header}.{encoded_claims}");
+        let signature = signing_key.sign(signing_input.as_bytes());
+
+        format!(
+            "{}.{}",
+            signing_input,
+            URL_SAFE_NO_PAD.encode(signature.to_bytes())
+        )
     }
 }

@@ -64,7 +64,7 @@ Nazo OAuth Server 是一个基于 Actix Web 的 OAuth/OIDC 服务，提供用户
 
 ## 配置
 
-服务启动时只读取当前工作目录下的 `.env.yaml`。不支持 `.env`，也不从进程环境变量读取运行配置；如果 `.env` 存在，服务会拒绝启动。配置文件未提供时使用内置默认值；配置文件存在但不可读、格式错误或字段类型错误时启动失败。
+服务启动时只读取当前工作目录下的 `.env.yaml`。不支持 `.env`，也不从进程环境变量读取运行配置；如果 `.env` 存在，或 `.env.yaml` 未提供、不可读、格式错误、字段类型错误，服务会拒绝启动。表格中的默认值只适用于 `.env.yaml` 已存在但省略了对应字段的情况。
 
 `.env.yaml` 支持顶层键值形式；数组值会按逗号合并，适合 `CORS_ALLOWED_ORIGINS` 这类列表配置。仓库提供 `.env.yaml.example` 作为字段参考，真实配置文件不应提交。
 
@@ -91,6 +91,7 @@ Nazo OAuth Server 是一个基于 Actix Web 的 OAuth/OIDC 服务，提供用户
 | `EMAIL_DELIVERY` | `disabled` | 邮件投递方式；`smtp` 启用真实 SMTP 投递，`disabled` 时 `/auth/send-code` 返回服务不可用 |
 | `EMAIL_CODE_TTL_SECONDS` | `900` | 注册邮箱验证码有效期，单位为秒 |
 | `EMAIL_CODE_SEND_COOLDOWN_SECONDS` | `60` | 同一邮箱验证码发送冷却时间，单位为秒 |
+| `EMAIL_CODE_PEER_COOLDOWN_SECONDS` | `5` | 同一来源地址验证码发送冷却时间，单位为秒 |
 | `EMAIL_SMTP_HOST` | 无 | SMTP 主机；`EMAIL_DELIVERY=smtp` 时必填 |
 | `EMAIL_SMTP_PORT` | `587` | SMTP 端口 |
 | `EMAIL_SMTP_TLS` | `starttls` | SMTP TLS 模式，可选 `starttls`、`implicit`、`none` |

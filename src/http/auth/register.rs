@@ -54,7 +54,6 @@ pub(crate) async fn register(
         );
     }
 
-    let _ = valkey_del(&state.valkey, &key).await;
     let password_hash = match hash_password(&payload.password) {
         Ok(v) => v,
         Err(_) => {
@@ -80,7 +79,7 @@ pub(crate) async fn register(
     let row = diesel::insert_into(users::table)
         .values((
             users::username.eq(username),
-            users::email.eq(email),
+            users::email.eq(&email),
             users::password_hash.eq(password_hash),
             users::email_verified.eq(true),
         ))
@@ -88,10 +87,27 @@ pub(crate) async fn register(
         .get_result::<UserRow>(&mut conn)
         .await;
     match row {
-        Ok(user) => json_response_status(
-            StatusCode::CREATED,
-            json!({"id": user.id, "email": user.email}),
-        ),
-        Err(_) => oauth_error(StatusCode::CONFLICT, "invalid_request", "该邮箱已注册."),
+        Ok(user) => {
+            let _ = valkey_del(&state.valkey, &key).await;
+            json_response_status(
+                StatusCode::CREATED,
+                json!({"id": user.id, "email": user.email}),
+            )
+        }
+        Err(diesel::result::Error::DatabaseError(
+            diesel::result::DatabaseErrorKind::UniqueViolation,
+            _,
+        )) => {
+            let _ = valkey_del(&state.valkey, &key).await;
+            oauth_error(StatusCode::CONFLICT, "invalid_request", "该邮箱已注册.")
+        }
+        Err(error) => {
+            tracing::warn!(%error, "failed to create user");
+            oauth_error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "server_error",
+                "用户创建失败.",
+            )
+        }
     }
 }
