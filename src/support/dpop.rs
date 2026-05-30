@@ -1,1 +1,207 @@
-// placeholder
+use std::convert::TryInto;
+
+use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+use serde::Deserialize;
+
+use super::prelude::*;
+use super::{oauth_error, valkey_set_ex};
+
+const DPOP_TTL_SECONDS: i64 = 300;
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum AccessTokenAuthScheme {
+    Bearer,
+    DPoP,
+}
+
+#[derive(Debug)]
+pub(crate) enum DpopError {
+    MissingProof,
+    MalformedProof,
+    InvalidProof,
+    ReplayDetected,
+    BindingMismatch,
+}
+
+#[derive(Deserialize)]
+struct DpopHeader {
+    alg: String,
+    typ: Option<String>,
+    jwk: Value,
+}
+
+#[derive(Deserialize)]
+struct DpopClaims {
+    htm: String,
+    htu: String,
+    iat: i64,
+    jti: String,
+    ath: Option<String>,
+}
+
+pub(crate) fn dpop_error_response(error: DpopError) -> HttpResponse {
+    let description = match error {
+        DpopError::MissingProof => "DPoP proof is required.",
+        DpopError::MalformedProof => "DPoP proof is malformed.",
+        DpopError::InvalidProof => "DPoP proof validation failed.",
+        DpopError::ReplayDetected => "DPoP proof jti has already been used.",
+        DpopError::BindingMismatch => "DPoP binding mismatch.",
+    };
+    let mut response = oauth_error(
+        if matches!(error, DpopError::MissingProof) {
+            StatusCode::UNAUTHORIZED
+        } else {
+            StatusCode::BAD_REQUEST
+        },
+        "invalid_dpop_proof",
+        description,
+    );
+    response.headers_mut().insert(
+        header::WWW_AUTHENTICATE,
+        HeaderValue::from_static("DPoP error=\"invalid_dpop_proof\""),
+    );
+    response
+}
+
+pub(crate) fn authorization_access_token(headers: &HeaderMap) -> Option<(AccessTokenAuthScheme, String)> {
+    let raw = headers.get(header::AUTHORIZATION)?.to_str().ok()?;
+    if let Some(value) = raw.strip_prefix("DPoP ") {
+        return Some((AccessTokenAuthScheme::DPoP, value.to_owned()));
+    }
+    raw.strip_prefix("Bearer ")
+        .map(|value| (AccessTokenAuthScheme::Bearer, value.to_owned()))
+}
+
+pub(crate) async fn validate_dpop_proof(
+    state: &AppState,
+    req: &HttpRequest,
+    token_for_ath: Option<&str>,
+    expected_jkt: Option<&str>,
+) -> Result<Option<String>, DpopError> {
+    let Some(raw) = req
+        .headers()
+        .get(header::HeaderName::from_static("dpop"))
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return if expected_jkt.is_some() { Err(DpopError::MissingProof) } else { Ok(None) };
+    };
+
+    let (header, claims, signing_input, signature) = decode_proof(raw)?;
+    if header.alg != "EdDSA"
+        || !header
+            .typ
+            .as_deref()
+            .is_some_and(|value| value.eq_ignore_ascii_case("dpop+jwt"))
+    {
+        return Err(DpopError::InvalidProof);
+    }
+    let jkt = jwk_thumbprint(&header.jwk)?;
+    if expected_jkt.is_some_and(|expected| expected != jkt.as_str()) {
+        return Err(DpopError::BindingMismatch);
+    }
+    verify_signature(&header.jwk, signing_input.as_bytes(), &signature)?;
+
+    let expected_htu = format!(
+        "{}{}",
+        state.settings.issuer.trim_end_matches('/'),
+        req.uri().path()
+    );
+    let actual_htu = normalize_htu(&claims.htu)?;
+    if actual_htu != expected_htu || !claims.htm.eq_ignore_ascii_case(req.method().as_str()) {
+        return Err(DpopError::InvalidProof);
+    }
+    let now = Utc::now().timestamp();
+    if claims.iat > now + 30 || now - claims.iat > DPOP_TTL_SECONDS || claims.jti.trim().is_empty() {
+        return Err(DpopError::InvalidProof);
+    }
+    if let Some(value) = token_for_ath {
+        let expected_ath = URL_SAFE_NO_PAD.encode(Sha256::digest(value.as_bytes()));
+        if claims.ath.as_deref() != Some(expected_ath.as_str()) {
+            return Err(DpopError::InvalidProof);
+        }
+    }
+
+    let replay_key = format!("oauth:dpop:jti:{jkt}:{}", claims.jti);
+    if valkey_get(&state.valkey, replay_key.clone())
+        .await
+        .map_err(|_| DpopError::InvalidProof)?
+        .is_some()
+    {
+        return Err(DpopError::ReplayDetected);
+    }
+    valkey_set_ex(&state.valkey, replay_key, "1", DPOP_TTL_SECONDS as u64)
+        .await
+        .map_err(|_| DpopError::InvalidProof)?;
+    Ok(Some(jkt))
+}
+
+fn decode_proof(raw: &str) -> Result<(DpopHeader, DpopClaims, String, Vec<u8>), DpopError> {
+    let mut parts = raw.split('.');
+    let encoded_header = parts.next().ok_or(DpopError::MalformedProof)?;
+    let encoded_payload = parts.next().ok_or(DpopError::MalformedProof)?;
+    let encoded_signature = parts.next().ok_or(DpopError::MalformedProof)?;
+    if parts.next().is_some() {
+        return Err(DpopError::MalformedProof);
+    }
+    let header_bytes = URL_SAFE_NO_PAD
+        .decode(encoded_header)
+        .map_err(|_| DpopError::MalformedProof)?;
+    let payload_bytes = URL_SAFE_NO_PAD
+        .decode(encoded_payload)
+        .map_err(|_| DpopError::MalformedProof)?;
+    let signature = URL_SAFE_NO_PAD
+        .decode(encoded_signature)
+        .map_err(|_| DpopError::MalformedProof)?;
+    let header = serde_json::from_slice::<DpopHeader>(&header_bytes)
+        .map_err(|_| DpopError::MalformedProof)?;
+    let claims = serde_json::from_slice::<DpopClaims>(&payload_bytes)
+        .map_err(|_| DpopError::MalformedProof)?;
+    Ok((header, claims, format!("{encoded_header}.{encoded_payload}"), signature))
+}
+
+fn jwk_thumbprint(jwk: &Value) -> Result<String, DpopError> {
+    let kty = jwk
+        .get("kty")
+        .and_then(Value::as_str)
+        .ok_or(DpopError::MalformedProof)?;
+    let crv = jwk
+        .get("crv")
+        .and_then(Value::as_str)
+        .ok_or(DpopError::MalformedProof)?;
+    let x = jwk
+        .get("x")
+        .and_then(Value::as_str)
+        .ok_or(DpopError::MalformedProof)?;
+    if kty != "OKP" || crv != "Ed25519" {
+        return Err(DpopError::InvalidProof);
+    }
+    let canonical = format!(r#"{{"crv":"{crv}","kty":"OKP","x":"{x}"}}"#);
+    Ok(URL_SAFE_NO_PAD.encode(Sha256::digest(canonical.as_bytes())))
+}
+
+fn verify_signature(jwk: &Value, signing_input: &[u8], signature: &[u8]) -> Result<(), DpopError> {
+    let x = jwk
+        .get("x")
+        .and_then(Value::as_str)
+        .ok_or(DpopError::MalformedProof)?;
+    let key_bytes = URL_SAFE_NO_PAD
+        .decode(x)
+        .map_err(|_| DpopError::MalformedProof)?;
+    let key_bytes: [u8; 32] = key_bytes
+        .try_into()
+        .map_err(|_| DpopError::MalformedProof)?;
+    let signature = Signature::from_slice(signature).map_err(|_| DpopError::MalformedProof)?;
+    let verifying_key = VerifyingKey::from_bytes(&key_bytes).map_err(|_| DpopError::MalformedProof)?;
+    verifying_key
+        .verify(signing_input, &signature)
+        .map_err(|_| DpopError::InvalidProof)
+}
+
+fn normalize_htu(value: &str) -> Result<String, DpopError> {
+    let mut url = url::Url::parse(value).map_err(|_| DpopError::MalformedProof)?;
+    url.set_query(None);
+    url.set_fragment(None);
+    Ok(url.to_string())
+}
