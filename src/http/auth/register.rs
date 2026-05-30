@@ -15,12 +15,12 @@ pub(crate) async fn register(
     Json(payload): Json<RegisterRequest>,
 ) -> HttpResponse {
     let email = payload.email.trim().to_lowercase();
-    let code_hash = blake3_hex(payload.verification_code.trim());
+    let code = payload.verification_code.trim().to_string();
     let key = format!("oauth:email_verify:code:{email}");
     let stored = valkey_get(&state.valkey, &key).await.unwrap_or(None);
     if !stored
         .as_deref()
-        .is_some_and(|stored| constant_time_eq(stored.as_bytes(), code_hash.as_bytes()))
+        .is_some_and(|stored| verify_password(&code, stored))
     {
         return oauth_error(
             StatusCode::BAD_REQUEST,
