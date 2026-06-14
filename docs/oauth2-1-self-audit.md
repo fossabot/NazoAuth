@@ -25,7 +25,7 @@ References:
 | Area | Status | Evidence |
 | --- | --- | --- |
 | Authorization code grant | Implemented | `/authorize`, `/token`, PAR, signed request object handling, authorization code one-time consumption, and redirect matching tests. |
-| PKCE | Implemented as default requirement | S256 is required by default; the only no-PKCE path is an explicit confidential-client OIDC conformance compatibility flag. |
+| PKCE | Implemented as default requirement | S256 is required by default; the only no-PKCE path is an explicit confidential-client legacy compatibility flag, and sender-constrained clients must use PKCE. |
 | Refresh token grant | Implemented | Rotation, reuse detection, sender-constraint preservation, and documented lost-response retry state machine. |
 | Client credentials grant | Implemented | Confidential client authentication, resource/audience binding, and no `openid` user-subject overclaim. |
 | Implicit grant | Not supported | Discovery advertises `code`; no implicit response type is part of the profile matrix. |
