@@ -27,7 +27,7 @@ Current branch:
 Important local facts at handoff time:
 
 - The remote branch cleanup task was already completed earlier. Do not spend more time deleting remote branches unless GitHub state has changed.
-- The current branch contains many uncommitted coverage and security-path changes across `src/http/authorization`, `src/http/token`, `src/resource_server`, `src/support`, and corresponding `tests/unit` files.
+- The current branch contains many uncommitted coverage and security-path changes across `src/http/authorization`, `src/http/token`, `src/resource_server`, `src/support`, and corresponding `tests/in_source` files.
 - The last known successful full Docker coverage parse recorded `oauth_fapi_core: 6709/6797 = 98.71%`, with `88` missed lines.
 - The last attempted coverage run did not produce a usable success result. Local `tmp_cov_exit.txt` currently contains `101`, and `_tmp_coverage_run.log` shows a native Windows OpenSSL detection failure. Do not treat that run as evidence of test failure in the Linux/Docker CI path.
 - Native Windows `cargo` checks are known to fail on OpenSSL/libpq environment issues. Prefer Docker for compile, test, and coverage gates.
@@ -77,22 +77,22 @@ High-priority protocol files:
 
 Representative tests:
 
-- `oauth_backend_rust/tests/unit/src/http/token/tests/authorization_code.rs`
-- `oauth_backend_rust/tests/unit/src/http/token/tests/issue.rs`
-- `oauth_backend_rust/tests/unit/src/http/token/tests/revoke.rs`
-- `oauth_backend_rust/tests/unit/src/http/token/tests/introspect.rs`
-- `oauth_backend_rust/tests/unit/src/http/token/tests/client_credentials.rs`
-- `oauth_backend_rust/tests/unit/src/http/token/tests/dispatch.rs`
-- `oauth_backend_rust/tests/unit/src/http/authorization/tests/par.rs`
-- `oauth_backend_rust/tests/unit/src/http/authorization/tests/decision.rs`
-- `oauth_backend_rust/tests/unit/src/http/authorization/tests/request/prompt_none.rs`
-- `oauth_backend_rust/tests/unit/src/http/authorization/request/tests/parameters.rs`
-- `oauth_backend_rust/tests/unit/src/resource_server/tests/dpop.rs`
-- `oauth_backend_rust/tests/unit/src/support/tests/oauth_client_metadata.rs`
-- `oauth_backend_rust/tests/unit/src/support/tests/oauth_client_jwks.rs`
-- `oauth_backend_rust/tests/unit/src/support/tests/oauth_mtls_metadata.rs`
-- `oauth_backend_rust/tests/unit/src/support/tests/security/client_assertion.rs`
-- `oauth_backend_rust/tests/unit/src/support/tests/uri_policy.rs`
+- `oauth_backend_rust/tests/in_source/src/http/token/tests/authorization_code.rs`
+- `oauth_backend_rust/tests/in_source/src/http/token/tests/issue.rs`
+- `oauth_backend_rust/tests/in_source/src/http/token/tests/revoke.rs`
+- `oauth_backend_rust/tests/in_source/src/http/token/tests/introspect.rs`
+- `oauth_backend_rust/tests/in_source/src/http/token/tests/client_credentials.rs`
+- `oauth_backend_rust/tests/in_source/src/http/token/tests/dispatch.rs`
+- `oauth_backend_rust/tests/in_source/src/http/authorization/tests/par.rs`
+- `oauth_backend_rust/tests/in_source/src/http/authorization/tests/decision.rs`
+- `oauth_backend_rust/tests/in_source/src/http/authorization/tests/request/prompt_none.rs`
+- `oauth_backend_rust/tests/in_source/src/http/authorization/request/tests/parameters.rs`
+- `oauth_backend_rust/tests/in_source/src/resource_server/tests/dpop.rs`
+- `oauth_backend_rust/tests/in_source/src/support/tests/oauth_client_metadata.rs`
+- `oauth_backend_rust/tests/in_source/src/support/tests/oauth_client_jwks.rs`
+- `oauth_backend_rust/tests/in_source/src/support/tests/oauth_mtls_metadata.rs`
+- `oauth_backend_rust/tests/in_source/src/support/tests/security/client_assertion.rs`
+- `oauth_backend_rust/tests/in_source/src/support/tests/uri_policy.rs`
 
 ## Task 1: Baseline And Dirty-Tree Audit
 
@@ -137,7 +137,7 @@ Expected:
 Run:
 
 ```powershell
-git -C oauth_backend_rust diff -- tests/unit/src/http tests/unit/src/resource_server tests/unit/src/support
+git -C oauth_backend_rust diff -- tests/in_source/src/http tests/in_source/src/resource_server tests/in_source/src/support
 ```
 
 Expected:
@@ -255,8 +255,7 @@ Expected:
 
 - E2E passes.
 - Library tests pass.
-- `tests/oidf_seed.rs` passes.
-- `tests/resource_server.rs` passes.
+- Source-mounted tests under `tests/in_source` pass through `cargo test --locked --workspace --all-features --lib`.
 - `lcov.info` is refreshed.
 
 - [ ] **Step 2: If coverage fails, classify the failure**
