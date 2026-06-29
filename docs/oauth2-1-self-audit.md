@@ -53,7 +53,7 @@ References:
 
 | Profile | Status | Notes |
 | --- | --- | --- |
-| OIDC Basic OP | Implemented and OIDF-tested | Latest durable record is `docs/conformance/2026-06-08-oidf-full-matrix.md`; implementation-affecting commits must be retested. |
+| OIDC Basic OP | Implemented and OIDF-tested | Latest durable official record is `docs/conformance/2026-06-27-pr15-official-oidf-full-matrix.md`; implementation-affecting commits must be retested. |
 | OIDC Config | Implemented and OIDF-tested | Discovery metadata is generated from runtime profile/config. |
 | FAPI2 Security | Implemented and OIDF-tested | PAR, PKCE S256, confidential clients, sender-constrained tokens, and client auth policy are separated from Message Signing. |
 | FAPI2 Message Signing authz request | Implemented and OIDF-tested | Signed request objects at PAR with `aud`, `nbf`, and bounded `exp`. |
@@ -89,8 +89,9 @@ Implementation and workflow evidence:
   warnings`, `cargo test --all-targets --all-features --locked`, and `git diff
   --check`.
 
-The official OIDF full matrix passed on implementation commit
-`8f6901abe2a014b4a5d1e486d986598daf3b825f`, and the durable result index is
-`docs/conformance/2026-06-08-oidf-full-matrix.md`. Documentation-only commits
-can differ from the implementation commit under test; implementation-affecting
-commits must rerun the official matrix and add a fresh durable record.
+The latest retained official OIDF full matrix passed on runtime implementation
+commit `be7ef9f6a9197520235a59d42866a0918a293014`, and the durable result index
+is `docs/conformance/2026-06-27-pr15-official-oidf-full-matrix.md`.
+Documentation-only commits can differ from the implementation commit under
+test; implementation-affecting commits must rerun the official matrix and add a
+fresh durable record.
