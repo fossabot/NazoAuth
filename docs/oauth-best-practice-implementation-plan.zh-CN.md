@@ -66,22 +66,22 @@ Last reviewed: 2026-07-01.
 
 | ID | 测试包 | 当前缺口 | 验收条件 |
 | --- | --- | --- | --- |
-| TP-001 | FAPI precision test pack | 当前已有 FAPI/PAR/PKCE/client-auth/sender-constraint 测试，但需要更精确覆盖 FAPI 条款细节。 | 增加测试：authorization code lifetime <= 60s、PAR `expires_in` < 600s、FAPI PAR 必含 `redirect_uri`、non-PAR authorization request 拒绝、FAPI authorization endpoint 只接受 `client_id` + `request_uri`、避免 307、credential post 后使用 303。 |
+| TP-001 | FAPI precision test pack | 部分完成：已显式覆盖 FAPI code TTL 启动上限、PAR `expires_in` 启动上限、FAPI `/authorize` 外层仅允许 `client_id` + `request_uri`、form credential post 使用 303；既有测试已覆盖 FAPI PAR/client-auth/sender-constraint/non-PAR 拒绝主路径。 | 继续补齐：FAPI PAR 必含 `redirect_uri` 的 profile 级测试、避免 307 的集中断言、JWT clock skew、JWKS duplicate-`kid` 等剩余精确项。 |
 | TP-002 | JWT / JOSE BCP negative pack | RFC 8725 控制已部分存在，但矩阵要求更完整的 alg/key confusion 测试。 | 增加测试：`alg=none` 拒绝、wrong key type、wrong `kid`、wrong `use`/`alg`、cross-JWT substitution、weak RSA/unsupported curve、duplicate `kid` 选择或拒绝策略。 |
 | TP-003 | Client assertion FAPI clock-skew pack | `private_key_jwt` 已实现，但需按 FAPI 兼容窗口明确测试。 | 增加测试：接受 0-10s future `iat`/`nbf`，拒绝 >60s future；aud 在 FAPI 下必须是 AS issuer string，数组或 endpoint audience 只作为显式兼容例外。 |
 | TP-004 | OIDC reauthentication/auth context pack | `max_age`、`prompt`、`auth_time`、`acr`/`amr` 有实现和部分测试，但需矩阵级负向测试。 | 增加测试：stale session、`prompt=none` 下需要 reauth 的失败、unsupported essential claim、不得伪造 `acr`/`amr`、`auth_time` 只在有真实认证证据时输出。 |
 | TP-005 | Offline access pack | `offline_access` 与 refresh_token grant 有校验，但需从 OIDC consent/risk 角度补完。 | 增加测试：无 refresh grant 时拒绝 `offline_access`、缺 consent 不发长期 refresh token、scope narrowing、revocation、sender constraint 与 refresh issuance 关系。 |
 | TP-006 | Browser / SPA / BFF pack | 当前 CORS 和同源 session 有测试，并已覆盖 authorization endpoint CORS forbidden；但仍未形成完整浏览器 OAuth profile 测试包。 | 增加测试：禁止 implicit/token fragment、credentialed CORS 不泛化、浏览器 refresh-token reuse、browser client silent privilege expansion。 |
 | TP-007 | Race/replay pack | 单次状态和 replay 已有测试，但矩阵要求并发重放级别验收。 | 增加测试：authorization code、PAR `request_uri`、request object `jti`、client assertion `jti`、DPoP `jti`、refresh-token family 并发消费。 |
-| TP-008 | Metadata overclaim pack | metadata truth 已有测试，但每新增 profile 需要显式防 overclaim。 | 增加测试：未实现 signed introspection、DCR、Device Grant、Token Exchange、Front-Channel Logout、Session Management、JWE/UserInfo signing 时 discovery 不广告。 |
+| TP-008 | Metadata overclaim pack | 完成当前范围：已增加 discovery 防 overclaim 测试，覆盖 signed introspection、DCR、Device Grant、Token Exchange、JWT bearer grant、Front-Channel Logout、Session Management、JWE/UserInfo signing/encryption。 | 每新增 profile 或协议能力时必须同步扩展 metadata gating 测试。 |
 
 ## 部分完成或 profile-scoped 的控制项
 
 | ID | 控制项 | 当前状态 | 不足 | 下一步 |
 | --- | --- | --- | --- | --- |
-| PS-001 | FAPI 2.0 Message Signing | 部分完成 | signed request object 和 signed authorization response 已覆盖；signed introspection 未实现。 | 先实现 RFC 9701，再单独声明 FAPI signed-introspection option。 |
-| PS-002 | RFC 7523 | 部分完成 | `private_key_jwt` 已完成；JWT bearer authorization grant 未实现。 | 若产品需要 assertion grant，另建 trust policy、subject mapping、audience、jti replay 和 grant metadata。 |
-| PS-003 | RFC 9101 JAR | profile-scoped | direct signed request object 已实现；external `request_uri` by-reference 未实现。 | 除非有明确生态需求，否则继续 defer；若实现，先设计 SSRF、cache、content-type、allowlist 和 lifetime 控制。 |
+| PS-001 | FAPI 2.0 Message Signing | 部分完成 / metadata-gated | signed request object 和 signed authorization response 已覆盖；signed introspection 未实现且 discovery 不广告。 | 先实现 RFC 9701，再单独声明 FAPI signed-introspection option。 |
+| PS-002 | RFC 7523 | 部分完成 / metadata-gated | `private_key_jwt` 已完成；JWT bearer authorization grant 未实现且 `grant_types_supported` 不广告。 | 若产品需要 assertion grant，另建 trust policy、subject mapping、audience、jti replay 和 grant metadata。 |
+| PS-003 | RFC 9101 JAR | profile-scoped | direct signed request object 已实现；external `request_uri` by-reference 未实现，当前只支持 PAR `request_uri`。 | 除非有明确生态需求，否则继续 defer；若实现，先设计 SSRF、cache、content-type、allowlist 和 lifetime 控制。 |
 | PS-004 | RFC 9396 RAR | profile-scoped | 只支持 allowlisted types，不是通用任意 JSON registry。 | 新增 type 必须走 parser/policy/consent/token/resource-server 全链路。 |
 | PS-005 | RFC 9068 JWT access token | profile-scoped | 当前 profile 使用 JWT access token；opaque token + introspection 也是安全可选架构但未实现。 | 不把 JWT access token 写成 OAuth/FAPI 唯一路径；如引入 opaque token，必须补 introspection/cache/revocation/signed response。 |
 | PS-006 | Back-Channel Logout | profile-scoped | 已有 best-effort delivery；没有 durable retry queue。 | 若要提升为强交付能力，补队列、重试、遥测、失败状态和测试。 |
