@@ -40,17 +40,17 @@ Last reviewed: 2026-07-01.
 | BP-006 | PAR endpoint、PAR handle 持久化和单次消费 | 完成 | `src/http/authorization/par.rs`, `src/http/authorization/request.rs`, PAR tests | PAR payload 不保留客户端 secret；`request_uri` 消费必须一次性。 |
 | BP-007 | FAPI profile 自动要求 PAR | 完成 | `src/settings.rs`, `src/http/authorization/request.rs`, FAPI/PAR tests | FAPI 下 non-PAR authorization request 继续拒绝。 |
 | BP-008 | Direct signed request object / JAR | 完成 | `src/http/authorization/jar.rs`, JAR/PAR tests | 继续校验签名、issuer/client、audience、nbf/exp、参数冲突。 |
-| BP-009 | Signed request object `jti` replay protection policy | 基本完成，需补精确测试 | JAR validation and replay cache tests | 高价值部署建议要求 `REQUEST_OBJECT_JTI_POLICY=required-for-signed-jar`。 |
+| BP-009 | Signed request object `jti` replay protection policy | 完成 | `src/http/authorization/jar.rs`, `tests/in_source/src/http/authorization/tests/jar.rs`, `docs/profile-matrix.md` | 高价值部署建议要求 `REQUEST_OBJECT_JTI_POLICY=required-for-signed-jar`。 |
 | BP-010 | JARM / `response_mode=jwt` signed authorization response | 完成 | authorization response JWT tests, OIDF FAPI Message Signing plans | 签名失败不得回退为 unsigned query response；不得暗示 JWE。 |
 | BP-011 | RFC 8707 Resource Indicators 全链路绑定 | 完成 | `src/support/oauth.rs`, authorization/PAR/token/refresh tests | `resource` 必须是无 fragment 的 absolute URI；refresh/token 只能收窄不能扩张。 |
 | BP-012 | JWT access token audience/resource binding | 完成 | `src/http/token/issue.rs`, token claim tests, resource-server verifier tests | 不为指定 resource 的请求签发宽泛 default audience token。 |
 | BP-013 | RFC 9396-style RAR allowlist 和 feature gate | 完成 | `src/domain/authorization_details.rs`, authorization/token/resource-server tests | 新 RAR type 必须补 parser、consent、policy、token claim 和 verifier tests。 |
-| BP-014 | Scope 授权和 consent reuse 不扩权 | 基本完成，需补精确测试 | consent/prompt=none tests, grant persistence | silent consent reuse 不得扩展 scope/resource/audience/authorization_details。 |
+| BP-014 | Scope 授权和 consent reuse 不扩权 | 完成 | `src/http/authorization/request/prompt_none.rs`, migration `20260701000100_user_grant_resource_indicators`, consent/prompt=none tests, grant persistence tests | silent consent reuse 不得扩展 scope/resource/audience/authorization_details。 |
 | BP-015 | Client authentication：public `none` + PKCE；confidential 必须认证；FAPI 只允许 `private_key_jwt` 或 mTLS | 完成 | `src/http/token/client_auth.rs`, `src/http/token/dispatch.rs`, OIDF FAPI plans | client secret auth 只保留 baseline compatibility。 |
 | BP-016 | `private_key_jwt` client authentication | 完成 | `src/support/security.rs`, client assertion tests | 保持签名、audience、exp/iat/nbf、jti、key status 和 replay 校验。 |
 | BP-017 | mTLS client authentication 和 mTLS sender-constrained token | 完成 | `src/support/mtls.rs`, mTLS tests, FAPI resource tests | certificate header 只在 trusted proxy CIDR 内可信。 |
 | BP-018 | DPoP proof validation 和 nonce policy | 完成 | `src/support/dpop.rs`, DPoP tests, resource-server DPoP tests | FAPI DPoP nonce 支持/要求不得因兼容性关闭。 |
-| BP-019 | Refresh-token rotation / reuse detection / FAPI sender-constrained refresh behavior | 基本完成，需补精确测试 | `src/http/token/refresh.rs`, refresh tests, `docs/refresh-token-rotation.md` | 区分 baseline bearer rotation 与 FAPI sender-constrained refresh policy。 |
+| BP-019 | Refresh-token rotation / reuse detection / FAPI sender-constrained refresh behavior | 完成 / profile-scoped | `src/http/token/refresh.rs`, `src/http/token/issue/refresh_persistence.rs`, refresh rotation/reuse/DPoP/mTLS/audience tests, `docs/refresh-token-rotation.md`, `docs/profile-matrix.md` | 区分 baseline bearer rotation 与 FAPI sender-constrained refresh policy。 |
 | BP-020 | Refresh-token audience narrowing | 完成 | migration `20260630000100_refresh_token_audience_binding`, refresh audience tests | audience 事实源是 refresh-token 持久状态，不是客户端输入。 |
 | BP-021 | Revocation 和 JSON introspection | 完成 | `src/http/token/revoke.rs`, `src/http/token/introspect.rs`, tests | 不泄露 token 有效性；signed introspection 另属 RFC 9701。 |
 | BP-022 | RFC 9728 Protected Resource Metadata | 完成 | `src/http/well_known.rs`, well-known/fapi resource tests | external resource API 必须使用一致的 protected resource identifier。 |
@@ -59,8 +59,8 @@ Last reviewed: 2026-07-01.
 | BP-025 | Key lifecycle、JWKS 发布和 external signer boundary | 完成 | `src/support/keyset.rs`, keyctl/keyset tests | active/previous/retired 状态不得破坏；metadata alg 必须与可用 key 一致。 |
 | BP-026 | Pairwise subject / sector identifier | 完成 | sector identifier and admin client tests | sector identifier 获取失败必须 fail closed；避免 SSRF。 |
 | BP-027 | UserInfo | 完成 | `src/http/token/userinfo.rs`, UserInfo tests | 需要 `openid` scope，并保留 sender-constrained token 校验。 |
-| BP-028 | RP-Initiated Logout 和 Back-Channel Logout | 完成 / profile-scoped | `src/http/profile/oidc_logout.rs`, logout tests | Back-Channel Logout 维持 best-effort 表述，除非实现持久重试。 |
-| BP-029 | CORS、cookie/session、CSRF、rate limit、错误语义、敏感日志约束 | 基本完成，需补精确测试 | CORS/session/CSRF/rate-limit/security tests | 按矩阵补 authorization endpoint CORS forbidden、浏览器 token 暴露等专项测试。 |
+| BP-028 | RP-Initiated Logout 和 Back-Channel Logout | 完成 / profile-scoped | `src/http/profile/oidc_logout.rs`, `tests/in_source/src/http/profile/tests/oidc_logout.rs`, discovery logout tests | Back-Channel Logout 维持 best-effort 表述，除非实现持久重试。 |
+| BP-029 | CORS、cookie/session、CSRF、rate limit、错误语义、敏感日志约束 | 完成 / browser-profile-scoped | `src/bootstrap/routes.rs`, CORS/session/CSRF/rate-limit/security tests, authorization endpoint CORS forbidden test | 后端保持最小 CORS 与同源/BFF session 边界；纯 SPA token storage 仍属 EX-005 产品/部署边界。 |
 
 ## 基本完成但需要补齐的精确测试包
 
@@ -71,7 +71,7 @@ Last reviewed: 2026-07-01.
 | TP-003 | Client assertion FAPI clock-skew pack | `private_key_jwt` 已实现，但需按 FAPI 兼容窗口明确测试。 | 增加测试：接受 0-10s future `iat`/`nbf`，拒绝 >60s future；aud 在 FAPI 下必须是 AS issuer string，数组或 endpoint audience 只作为显式兼容例外。 |
 | TP-004 | OIDC reauthentication/auth context pack | `max_age`、`prompt`、`auth_time`、`acr`/`amr` 有实现和部分测试，但需矩阵级负向测试。 | 增加测试：stale session、`prompt=none` 下需要 reauth 的失败、unsupported essential claim、不得伪造 `acr`/`amr`、`auth_time` 只在有真实认证证据时输出。 |
 | TP-005 | Offline access pack | `offline_access` 与 refresh_token grant 有校验，但需从 OIDC consent/risk 角度补完。 | 增加测试：无 refresh grant 时拒绝 `offline_access`、缺 consent 不发长期 refresh token、scope narrowing、revocation、sender constraint 与 refresh issuance 关系。 |
-| TP-006 | Browser / SPA / BFF pack | 当前 CORS 和同源 session 有测试，但未形成浏览器 OAuth profile 测试包。 | 增加测试：禁止 implicit/token fragment、authorization endpoint 不支持 CORS/XHR、credentialed CORS 不泛化、浏览器 refresh-token reuse、browser client silent privilege expansion。 |
+| TP-006 | Browser / SPA / BFF pack | 当前 CORS 和同源 session 有测试，并已覆盖 authorization endpoint CORS forbidden；但仍未形成完整浏览器 OAuth profile 测试包。 | 增加测试：禁止 implicit/token fragment、credentialed CORS 不泛化、浏览器 refresh-token reuse、browser client silent privilege expansion。 |
 | TP-007 | Race/replay pack | 单次状态和 replay 已有测试，但矩阵要求并发重放级别验收。 | 增加测试：authorization code、PAR `request_uri`、request object `jti`、client assertion `jti`、DPoP `jti`、refresh-token family 并发消费。 |
 | TP-008 | Metadata overclaim pack | metadata truth 已有测试，但每新增 profile 需要显式防 overclaim。 | 增加测试：未实现 signed introspection、DCR、Device Grant、Token Exchange、Front-Channel Logout、Session Management、JWE/UserInfo signing 时 discovery 不广告。 |
 
