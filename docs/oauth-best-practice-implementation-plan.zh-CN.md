@@ -228,9 +228,11 @@ Last reviewed: 2026-07-01.
   - 状态：完成 / bounded local access-token profile
   - 当前边界：仅接受本授权服务器签发且未撤销的 access token 作为 subject/actor token，仅签发新的本地 access token；要求显式 `resource` 或 RFC 8693 `audience`，scope 只能收窄，`actor_token` 会映射为 `act` claim。
   - 下一步：外部 issuer trust、refresh-token exchange、ID-token exchange、`authorization_details` 传播和更细 audit event 需作为独立 profile 设计。
-- [ ] **NI-004 RFC 7591 / OIDC Dynamic Client Registration**
-  - 状态：未实现
-  - 最小安全实现条件：initial access token 或 software statement policy、metadata validation、默认低权限、审计日志。
+- [x] **NI-004 RFC 7591 / OIDC Dynamic Client Registration**
+  - 状态：完成，默认关闭；仅当 `ENABLE_DYNAMIC_CLIENT_REGISTRATION=true` 时广告 `registration_endpoint` 并启用 `/register`。
+  - 当前边界：支持标准 metadata 创建客户端、返回创建后的 client metadata、可通过 `DYNAMIC_CLIENT_REGISTRATION_INITIAL_ACCESS_TOKEN` 要求 initial access token；不支持 `software_statement`、`jwks_uri` 拉取或 RFC 7592 registration management。
+  - OIDF 覆盖：OIDC Basic dynamic-client plan 已加入 full matrix 生成器。
+  - 保持要求：保持 metadata validation、默认低权限、initial access token、discovery truth 和动态注册一致性测试。
 - [ ] **NI-005 RFC 7592 Dynamic Client Registration Management**
   - 状态：未实现
   - 最小安全实现条件：registration access token 生命周期、read/update/delete 语义、权限隔离。

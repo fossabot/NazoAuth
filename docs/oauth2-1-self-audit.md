@@ -64,7 +64,8 @@ References:
 
 Product features outside the OAuth 2.1 core profile:
 
-- Dynamic Client Registration / RFC 7591.
+- Dynamic Client Registration / RFC 7591, implemented as a default-closed
+  ecosystem feature.
 - Client Configuration Management / RFC 7592.
 - Device Authorization Grant.
 - Token Exchange / RFC 8693.
