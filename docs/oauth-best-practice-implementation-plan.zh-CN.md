@@ -230,12 +230,14 @@ Last reviewed: 2026-07-01.
   - 下一步：外部 issuer trust、refresh-token exchange、ID-token exchange、`authorization_details` 传播和更细 audit event 需作为独立 profile 设计。
 - [x] **NI-004 RFC 7591 / OIDC Dynamic Client Registration**
   - 状态：完成，默认关闭；仅当 `ENABLE_DYNAMIC_CLIENT_REGISTRATION=true` 时广告 `registration_endpoint` 并启用 `/register`。
-  - 当前边界：支持标准 metadata 创建客户端、返回创建后的 client metadata、可通过 `DYNAMIC_CLIENT_REGISTRATION_INITIAL_ACCESS_TOKEN` 要求 initial access token；不支持 `software_statement`、`jwks_uri` 拉取或 RFC 7592 registration management。
+  - 当前边界：支持标准 metadata 创建客户端、返回创建后的 client metadata、可通过 `DYNAMIC_CLIENT_REGISTRATION_INITIAL_ACCESS_TOKEN` 要求 initial access token；不支持 `software_statement` 或 `jwks_uri` 拉取。
   - OIDF 覆盖：OIDC Basic dynamic-client plan 已加入 full matrix 生成器。
   - 保持要求：保持 metadata validation、默认低权限、initial access token、discovery truth 和动态注册一致性测试。
-- [ ] **NI-005 RFC 7592 Dynamic Client Registration Management**
-  - 状态：未实现
-  - 最小安全实现条件：registration access token 生命周期、read/update/delete 语义、权限隔离。
+- [x] **NI-005 RFC 7592 Dynamic Client Registration Management**
+  - 状态：完成，继承 `ENABLE_DYNAMIC_CLIENT_REGISTRATION=true` 默认关闭边界；仅 DCR 创建且持有 registration access token 的客户端可访问 `/register/{client_id}`。
+  - 当前边界：`registration_access_token` 仅以 BLAKE3 哈希存储；GET/PUT 成功后轮换 registration access token，secret-auth 客户端同步轮换 `client_secret`；PUT 采用全量替换并拒绝客户端提交服务器管理字段；DELETE 停用客户端、清除 registration token、撤销 refresh token 行并移除 user grants。
+  - 证据：`src/http/dynamic_client_registration.rs`、`src/http/admin/clients/create.rs`、`src/bootstrap/routes.rs`、`migrations/20260702000100_rfc7592_registration_management`、`tests/in_source/src/http/tests/dynamic_client_registration.rs`。
+  - OIDF 覆盖：当前官方 17-plan 矩阵仍以 OIDC dynamic-client plan 为准，见 `docs/conformance/2026-07-02-ni-004-official-oidf-full-matrix.md`；该矩阵存在 2 个预期 `SKIPPED`，不能作为 zero-SKIPPED 证据。NI-005 记录见 `docs/conformance/2026-07-02-ni-005-oidf-coverage.md`。
 - [ ] **NI-006 RFC 7523 third-party JWT bearer assertion trust**
   - 状态：未实现
   - 最小安全实现条件：外部 assertion issuer allowlist、subject mapping、audience、expiry、jti replay、grant-type policy 和审计。
@@ -266,6 +268,30 @@ Last reviewed: 2026-07-01.
 - [ ] **NI-015 RFC 9865 cursor pagination / RFC 9967 async SCIM or SCIM Security Events**
   - 状态：不广告
   - 最小安全实现条件：当前 SCIM docs 明确关闭；实现前不得在 SCIM ServiceProviderConfig 中广告。
+
+## NI OIDF 矩阵标注
+
+检索日期：2026-07-02。检索对象：OpenID Foundation `conformance-suite`
+源码快照 `21845642d279eacf627ed682094949050f1a88a4`。本表是后续每个
+NI 任务的默认 OIDF 矩阵动作；实现任务时仍需重新确认官方 suite 是否更新。
+
+| 任务 | 官方 suite 发现 | 本仓库矩阵动作 |
+| --- | --- | --- |
+| NI-001 RFC 9701 JWE introspection response | FAPI2 Message Signing Final plans 已覆盖 signed/encrypted introspection 相关 profile。 | 已在 full matrix 的 FAPI2 Message Signing 组合中保留；若 metadata/profile 变更，更新对应 FAPI2 Message Signing plan 配置和 conformance 记录。 |
+| NI-002 RFC 8628 Device Authorization Grant | 未发现 RFC 8628 AS-side 官方 plan；仅发现 metadata 字段和 CIBA/client 条件复用错误码。 | 不新增 OIDF 矩阵；保留 `docs/conformance/2026-07-01-ni-002-oidf-coverage.md` 和本地正/负向测试。 |
+| NI-003 RFC 8693 Token Exchange | 未发现 RFC 8693/token-exchange AS-side 官方 plan。 | 不新增 OIDF 矩阵；本地测试覆盖 issuer、audience/resource、scope downscope、revocation、actor-token 边界。 |
+| NI-004 RFC 7591 / OIDC Dynamic Client Registration | `oidcc-dynamic-certification-test-plan` 覆盖 OIDC dynamic client registration。 | 已加入 17-plan full matrix；保留 dynamic-client 官方结果和 expected SKIPPED 说明。 |
+| NI-005 RFC 7592 Dynamic Client Registration Management | 发现 Brazil DCR plans：`fapi1-advanced-final-brazil-dcr-test-plan`、`fapi2-security-profile-final-brazil-dcr-test-plan`、`fapi2-security-profile-id2-brazil-dcr-test-plan`；这些计划绑定 Brazil software statement、mTLS 和 Brazil profile。 | 当前不新增标准矩阵；除非产品明确实现 Brazil DCR profile，否则只记录 `docs/conformance/2026-07-02-ni-005-oidf-coverage.md` 并保留本地 RFC 7592 tests。 |
+| NI-006 RFC 7523 third-party JWT bearer assertion trust | RFC 7523 client authentication 负向场景已由 OIDC/FAPI plans 覆盖；未发现第三方 assertion issuer trust 专项 plan。 | 不新增矩阵；若实现外部 issuer trust，新增本地 issuer allowlist/subject mapping/replay tests，并记录未发现官方 plan。 |
+| NI-007 OpenID Connect CIBA / FAPI CIBA | `fapi-ciba-id1-test-plan` 覆盖 FAPI-CIBA AS；另有 RP/client alpha plan。 | 实现 CIBA Core/FAPI CIBA 时必须新增 FAPI-CIBA AS matrix；若只实现 CIBA Core 非 FAPI profile，需先确认是否有 Core-only plan。 |
+| NI-008 OpenID Connect Front-Channel Logout | `oidcc-frontchannel-rp-initiated-logout-certification-test-plan` 覆盖 OP front-channel logout + RP-initiated logout 组合。 | 实现并广告 front-channel logout 时新增该 OP plan；同时保留浏览器/iframe 本地测试。 |
+| NI-009 OpenID Connect Session Management | `oidcc-session-management-certification-test-plan` 覆盖 OP session management。 | 实现并广告 `check_session_iframe` 时新增该 OP plan；同时保留浏览器轮询和 session state 本地测试。 |
+| NI-010 OpenID Connect Federation 1.0 | 发现 federation entity / OP / RP alpha plans：`openid-federation-deployed-entity-test-plan`、`openid-federation-entity-joined-to-test-federation-op-test-plan`、`openid-federation-entity-joined-to-test-federation-rp-test-plan`。 | 实现 Federation OP/Entity 时新增对应 federation matrix；不得用普通 OIDC dynamic registration matrix 代替。 |
+| NI-011 OpenID Connect Native SSO | 未发现 Native SSO / `device_secret` 官方 plan。 | 不新增 OIDF 矩阵；实现前记录检索结论并补 device_secret lifecycle、rotation、revocation 本地测试。 |
+| NI-012 UserInfo signing/encryption | OIDC dynamic/basic modules 覆盖 signed UserInfo；suite 有 UserInfo encryption 条件和 client tests，但未发现独立 OP encryption certification plan。 | 若只支持 signed UserInfo，补 OIDC dynamic/static 组合即可；若支持 encrypted UserInfo，先确认官方 OP plan 是否新增，否则记录缺口并补本地 JWE tests。 |
+| NI-013 JARM/JWE encrypted authorization responses | FAPI2 Message Signing plans 覆盖 JARM；suite 有 authorization response encryption 条件。 | 实现 encrypted authorization response 时新增或扩展 FAPI2 Message Signing JARM/JWE 组合，确保 metadata 与实际 JWE 支持一致。 |
+| NI-014 FAPI 2.0 HTTP Signatures draft | 未发现 FAPI HTTP Signatures 官方 AS/RS plan。 | 不新增矩阵；实现前等待官方 plan 或目标生态要求，并补 canonicalization/signature 本地与资源服务器 E2E。 |
+| NI-015 RFC 9865 / RFC 9967 SCIM or SCIM Security Events | 未发现 RFC 9865 cursor pagination 或 SCIM async server plan；suite 有 Shared Signals Framework transmitter/receiver plans，并包含 RFC 9967 SCIM event type 常量。 | 纯 SCIM cursor/async 不新增 OIDF 矩阵；若实现 SCIM Security Events/SSF transmitter，新增 `openid-ssf-transmitter-test-plan` 或 receiver plan。 |
 
 ## 外部边界任务
 
