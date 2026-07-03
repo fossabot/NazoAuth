@@ -99,15 +99,22 @@ OAuth 2.1 draft / OIDC / FAPI 2.0 / FAPI-CIBA / CIBA 相关能力，并同时支
 
 任务：
 
-- [ ] **M0-01：维护路线图和状态摘要分离**
+- [x] **M0-01：维护路线图和状态摘要分离**
   - 路线图正文只写未来目标、实施顺序和验收标准。
   - 当前状态只放在“当前状态摘要”附录，不在正文里展开长状态清单。
-- [ ] **M0-02：维护 metadata truth gate**
+- [x] **M0-02：维护 metadata truth gate**
   - 每次新增或调整公开能力时，同步检查 Discovery、README、profile matrix 和 conformance 记录。
   - 禁止只更新 README 或 Discovery 而没有实现、测试和配置 gate。
-- [ ] **M0-03：维护 OIDF 覆盖检索记录**
+- [x] **M0-03：维护 OIDF 覆盖检索记录**
   - 每个新增 OAuth/OIDC/FAPI profile 都要查 OIDF conformance suite。
   - 有官方 plan 时加入本仓库执行矩阵；没有官方 plan 时记录检索日期和缺口。
+
+本次 M0 交付：
+
+- README / README.zh-CN 的路线图入口已从“实施任务书”改为“未来路线图”。
+- README / README.zh-CN 已避免把 OAuth 2.1 draft、模块化第三方登录和外部 federation 写成当前默认能力。
+- Back-Channel Logout 公开表述已从 best-effort 更新为 signed logout token + durable outbox delivery。
+- M0 验收命令已通过；命令见下方验收块。
 
 验收：
 
