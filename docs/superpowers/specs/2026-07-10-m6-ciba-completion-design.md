@@ -1,0 +1,325 @@
+# M6 CIBA / FAPI-CIBA Completion Design
+
+**Date:** 2026-07-10  
+**Status:** Approved for implementation  
+**Backend repository:** `F:\projects\nazo_oauth\oauth_backend_rust`  
+**Frontend repository:** `F:\projects\nazo_oauth\NazoAuthWeb`
+
+## 1. Context
+
+The M6 roadmap requires three outcomes:
+
+- M6-01 completes the CIBA poll-mode product boundary, including user confirmation, audit events, protocol errors, sender-constrained tokens, polling interval enforcement, and the complete `auth_req_id` lifecycle.
+- M6-02 keeps the official FAPI-CIBA compatibility profile separate from the internal `fapi2-ciba` hardening profile.
+- M6-03 keeps Discovery metadata and runtime feature/grant gates aligned without applying authorization-code-only controls to CIBA.
+
+The current implementation already provides most CIBA Core and profile behavior, but its state transitions are not atomic. Approved state is loaded and later deleted with the deletion result ignored, so concurrent token requests can both observe an approved request and reach token issuance. Pending poll state writes and terminal deletes also ignore storage failures. These are lifecycle correctness defects, not documentation gaps.
+
+The official frontend repository has an unmerged CIBA page in commit `0ebf6c7`, while its `main` branch already contains the shared authentication, routing, i18n, and device-verification foundations needed to integrate that page.
+
+## 2. Goals
+
+1. Make every CIBA state transition conditional on the exact Valkey state that was evaluated.
+2. Guarantee that an approved `auth_req_id` can be consumed by at most one token request.
+3. Propagate Valkey failures as protocol-level server failures instead of continuing with stale state.
+4. Record structured, redacted audit events for CIBA request creation and user/automation decisions.
+5. Ship the authenticated user-confirmation page in the official frontend repository.
+6. Preserve the existing official FAPI-CIBA compatibility behavior and the stricter internal `fapi2-ciba` behavior as separate profiles.
+7. Prove the result with deterministic unit/integration tests, Linux/Docker gates, frontend lint/build, and a fresh official FAPI-CIBA OIDF workflow run.
+
+## 3. Non-goals
+
+- CIBA ping or push delivery modes.
+- CIBA `user_code` support.
+- A PostgreSQL persistence model for short-lived CIBA requests.
+- An official “FAPI2-CIBA” standards or certification claim.
+- Applying PAR, PKCE, authorization-code response types, or other authorization-code-only controls to CIBA.
+- A general frontend redesign or a new frontend test framework.
+- Creating a pull request unless separately requested.
+
+## 4. Repository and Branch Boundaries
+
+Both repositories start from their fetched, clean `main` branches.
+
+- Backend work uses `codex/m6-ciba-completion` in `NazoAuth`.
+- Frontend work uses `codex/m6-ciba-completion` in `NazoAuthWeb`.
+- The approved design specification is committed in the backend branch before implementation.
+- The existing frontend commit `0ebf6c7` is reviewed and cherry-picked or reapplied onto the new frontend branch; its old branch is not treated as the delivery branch.
+- Both branches may be pushed because the official backend workflow requires a remote ref. No pull request is created without a separate request.
+
+## 5. State Model and Atomic Storage Primitives
+
+Valkey remains the only source of truth for a live `auth_req_id`. No database table or secondary state cache is added.
+
+### 5.1 Stored snapshot
+
+Loading a CIBA request returns both:
+
+- the exact raw JSON string read from Valkey; and
+- the parsed `CibaRequestState`.
+
+The raw value is the optimistic-concurrency version. A transition is valid only if Valkey still contains that exact value.
+
+### 5.2 Atomic primitives
+
+The existing Valkey support module gains two small operations implemented with Valkey-side Lua and the existing client dependency:
+
+- compare-and-set-with-expiry: replace a key only when its current value exactly equals the expected raw value;
+- compare-and-delete: delete a key only when its current value exactly equals the expected raw value.
+
+Each operation returns `true` when it applied the transition, `false` on a state conflict, and a Valkey error on storage failure. No new crate is introduced.
+
+### 5.3 Conflict handling
+
+CIBA transition callers use at most four read/evaluate/compare attempts. A comparison conflict reloads the current snapshot and recomputes the protocol result. The caller never continues using the stale snapshot.
+
+Four consecutive conflicts or any Valkey command failure returns the existing non-cacheable `server_error` response with HTTP 503. This bound prevents an unbounded loop under hostile concurrent polling while failing closed.
+
+## 6. Pure Rust State Transitions
+
+Protocol decisions remain in Rust rather than Lua. Small pure transition functions make the behavior deterministic and independently testable.
+
+### 6.1 Poll transition
+
+Given a snapshot and the current timestamp, the poll transition produces one of:
+
+- `AuthorizationPending(next_state)` when this is the first permitted pending poll;
+- `SlowDown(next_state)` when the client polls before the active interval has elapsed;
+- `ConsumeApproved`;
+- `ConsumeDenied`;
+- `ConsumeExpired`.
+
+For `AuthorizationPending`, `last_poll_at` becomes the current time. For `SlowDown`, the interval increases by five seconds using saturating arithmetic and `last_poll_at` becomes the current time.
+
+Pending and slow-down transitions use compare-and-set. Approved, denied, and expired transitions use compare-and-delete.
+
+### 6.2 Decision transition
+
+The decision transition validates, in order:
+
+1. the request still exists;
+2. an authenticated user decision belongs to the request user;
+3. the request is still pending;
+4. the request has not expired;
+5. the requested decision is approve or deny.
+
+A valid decision produces a terminal replacement state and is persisted by compare-and-set. A conflict reloads the state. A terminal state cannot be overwritten by a later manual or automated decision.
+
+Expired decision state is consumed with compare-and-delete before returning the existing expired/invalid request response.
+
+## 7. HTTP and Protocol Data Flow
+
+### 7.1 Backchannel authentication request
+
+The existing order remains:
+
+1. require `ENABLE_CIBA=true`;
+2. parse the backchannel form and reject mixed client-authentication methods;
+3. authenticate an active client;
+4. require the registered CIBA grant;
+5. apply the selected CIBA profile and request-object policy;
+6. validate scope, user hint, requested expiry, ACR, and binding message;
+7. persist the pending state with expiry plus the existing expired-state retention window;
+8. emit the start audit event;
+9. return `auth_req_id`, `expires_in`, and `interval`.
+
+The audit event is emitted only after persistence succeeds.
+
+### 7.2 User and automated decisions
+
+The authenticated user flow retains session and CSRF enforcement. The automated OIDF hook retains constant-time decision-token validation. Both flows use the same atomic decision transition.
+
+The automated handler accepts the request context so its source IP can be hashed for audit parity. The automation decision token is never logged or included in an audit field.
+
+### 7.3 Token polling
+
+The existing token endpoint continues to authenticate the client and require that client’s registered CIBA grant before entering CIBA processing.
+
+For each poll:
+
+1. validate the selected CIBA profile and required DPoP or mTLS proof;
+2. load the stored snapshot;
+3. require the stored client ID to match the authenticated client;
+4. consume the client assertion according to existing replay policy;
+5. evaluate the pure poll transition;
+6. atomically apply or consume the exact snapshot;
+7. return the corresponding protocol result.
+
+Only a request that successfully compare-deletes an approved snapshot can construct and issue tokens. Concurrent consumers that lose the comparison reload and then receive `invalid_grant` after the state is absent.
+
+The approved state is consumed before database-backed token issuance, matching the project’s one-time authorization-code and device-code security boundary. If downstream issuance fails, the one-time grant is not restored; replay prevention takes precedence over retrying a partially executed grant.
+
+## 8. Error Semantics
+
+The implementation keeps protocol errors precise and non-cacheable:
+
+| Condition | Response |
+| --- | --- |
+| CIBA disabled at `/bc-authorize` | HTTP 404 |
+| CIBA disabled at `/token` | `unsupported_grant_type` |
+| Client lacks CIBA grant | `unauthorized_client` |
+| Missing `auth_req_id` | `invalid_request` |
+| Unknown/consumed `auth_req_id` | `invalid_grant` |
+| Stored client mismatch | `invalid_grant` |
+| Pending first/allowed poll | `authorization_pending` |
+| Poll before interval | `slow_down` and interval +5 seconds |
+| Retained but expired state | `expired_token` |
+| Denied request | `access_denied` |
+| Repeated/terminal decision | `invalid_request` |
+| Manual decision user mismatch | `access_denied` |
+| Valkey read, compare, write, or delete failure | HTTP 503 `server_error` |
+| Persistent state contention after four attempts | HTTP 503 `server_error` |
+
+No state update or terminal delete error is discarded.
+
+## 9. Audit Model
+
+The structured audit registry gains three authorization-category events:
+
+- `ciba_authorization_started`;
+- `ciba_authorization_approved`;
+- `ciba_authorization_denied`.
+
+The event fields are intentionally bounded:
+
+- `client_id`;
+- `user_id`;
+- `auth_req_id_hash` using the project’s existing BLAKE3 helper;
+- scope and audience for the start event;
+- `decision_source` with value `user` or `automation` for terminal decisions;
+- `source_ip_hash` when a request context is available.
+
+Raw `auth_req_id`, binding message, decision token, client assertion, DPoP proof, access token, refresh token, and client secret are excluded. Polling events are not logged individually because they would create attacker-controlled audit volume. Successful token creation remains covered by the existing `token_issued` event.
+
+## 10. FAPI-CIBA and Internal Profile Isolation
+
+`fapi-ciba-id1-plain-private-key-jwt-poll` remains the compatibility profile used by the official OIDF plan. Existing per-client request-object policy, private-key JWT endpoint-audience compatibility, and mTLS holder-of-key compatibility remain unchanged unless a failing conformance test proves otherwise.
+
+`fapi2-ciba` remains an internal hardening profile. It continues to require confidential clients, private-key JWT or mTLS authentication, issuer-only private-key JWT audience, signed backchannel request objects, strong signing algorithms, and DPoP or mTLS sender-constrained tokens.
+
+Discovery advertises only standard CIBA capabilities. It never serializes `fapi2-ciba`, `Fapi2Ciba`, or an invented FAPI2-CIBA profile claim. README, profile documentation, and OIDF plan names keep the same distinction.
+
+PAR, PKCE, and `response_type=code` requirements remain scoped to authorization-code processing and are not added to the CIBA request or token paths.
+
+## 11. Metadata and Client Grant Truth
+
+When `ENABLE_CIBA=false`, Discovery omits:
+
+- the CIBA grant type;
+- `backchannel_authentication_endpoint`;
+- backchannel token delivery modes;
+- backchannel request signing algorithms;
+- the backchannel user-code capability field.
+
+When `ENABLE_CIBA=true`, Discovery advertises the implemented poll mode and supported signing algorithms without internal profile names.
+
+Discovery is server-wide and therefore cannot depend on a particular unauthenticated client. Runtime execution provides the client-specific half of the truth boundary: both `/bc-authorize` and `/token` require the authenticated client to have registered `urn:openid:params:grant-type:ciba`.
+
+## 12. Frontend Integration
+
+The frontend branch starts from `NazoAuthWeb/main`. Commit `0ebf6c7` supplies the initial route, page, styles, and response types, but the integrated result is adapted to current main rather than accepted blindly.
+
+The page:
+
+- is routed at `/ciba/:authReqId` under the existing authenticated-route guard;
+- is treated as an isolated authorization page without the normal navigation shell;
+- preserves the full CIBA URL through login and returns to it after authentication;
+- loads `/auth/ciba/{auth_req_id}` with URL encoding;
+- displays client name and ID, scopes, audiences, binding message, issue time, and expiry time;
+- submits approve or deny with the existing CSRF value;
+- disables both actions during submission and removes the request after a terminal success;
+- does not render the raw `auth_req_id` as page content;
+- uses the current i18n provider for user-visible copy;
+- follows the existing design tokens and responsive behavior.
+
+No new frontend framework, state library, or test dependency is introduced.
+
+## 13. Test Strategy
+
+Implementation follows red-green-refactor. Production behavior is not added before a test demonstrates the missing behavior.
+
+### 13.1 Backend unit tests
+
+Tests cover:
+
+- first pending poll;
+- permitted later pending poll;
+- early poll and five-second interval increase;
+- approved, denied, and expired transition selection;
+- manual decision user mismatch;
+- repeated decision rejection;
+- audit field construction and exclusion of raw secrets;
+- FAPI-CIBA compatibility behavior;
+- internal `fapi2-ciba` requirements;
+- sender constraint propagation to both access and refresh tokens;
+- client/grant mismatch error semantics;
+- CIBA metadata absence when disabled;
+- standard-only metadata when the internal profile is selected;
+- absence of authorization-code-only CIBA requirements.
+
+### 13.2 Live Valkey tests
+
+Docker-backed tests cover:
+
+- compare-and-set success and expected-value mismatch;
+- compare-and-delete success and second-consumer failure;
+- concurrent pending polls producing one applied transition and conflict-driven recomputation;
+- concurrent approved consumers producing exactly one successful terminal consumption;
+- Valkey unavailability mapping to `server_error` rather than a protocol success or stale-state response.
+
+### 13.3 Frontend gate
+
+The frontend runs its existing `npm test`, which executes ESLint and the TypeScript/Vite production build. A new unit-test framework is not introduced solely for this page.
+
+### 13.4 Backend Linux/Docker gates
+
+The backend runs from `oauth_backend_rust` in Linux/Docker with PostgreSQL and Valkey available:
+
+```text
+cargo fmt --check
+cargo check --workspace --all-targets --all-features --locked
+cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+cargo test --locked ciba --lib
+cargo test --locked well_known --lib
+cargo test --locked --workspace --all-features --lib
+```
+
+The current Windows host’s OpenSSL/libpq toolchain result is diagnostic only and is not represented as the Linux gate result.
+
+## 14. Official OIDF Verification
+
+After local gates pass:
+
+1. commit and push the backend implementation branch;
+2. dispatch `.github/workflows/oidf-conformance-full.yml` against `codex/m6-ciba-completion`;
+3. identify and record the GitHub Actions run ID;
+4. wait for the FAPI-CIBA plan job and the overall workflow to finish;
+5. record the exact tested commit, job name, plan variant, module counts, failure/warning counts, and final conclusion;
+6. do not describe an internal `fapi2-ciba` result as official certification.
+
+The required plan is the official FAPI-CIBA ID1 private-key JWT, poll, plain-FAPI, static-client variant already present in the repository matrix. If the workflow has no single-plan dispatch input, the full matrix runs and the FAPI-CIBA job is reported separately.
+
+A failing official run is investigated and corrected from its actual job/module evidence. It is not replaced by a documentation exception or an old successful result.
+
+## 15. Documentation and Completion State
+
+After the fresh OIDF run succeeds, the backend branch adds an isolated conformance result record containing the run evidence and updates the conformance index.
+
+Only then are M6-01, M6-02, and M6-03 checked as complete in `docs/protocol/oauth-best-practice-implementation-plan.zh-CN.md`. The roadmap status summary is updated consistently, while the protocol/profile documents continue to describe FAPI-CIBA as a compatibility profile and `fapi2-ciba` as internal hardening.
+
+The result record may be a documentation-only commit after the tested implementation commit. It must name the exact implementation commit exercised by OIDF so that the evidence remains attributable even though the branch head advances for documentation.
+
+## 16. Completion Criteria
+
+M6 is complete only when all of the following are true:
+
+1. approved CIBA state is atomically consumable at most once;
+2. pending poll interval state and every terminal transition are atomic;
+3. Valkey failures are surfaced and no relevant result is ignored;
+4. start, approve, and deny audit events are registered, emitted after successful transitions, and redacted;
+5. the official frontend contains the authenticated CIBA confirmation flow and passes `npm test`;
+6. compatibility and internal profiles remain behaviorally and textually isolated;
+7. Discovery and runtime client-grant gates match the implemented surface;
+8. targeted and full backend Docker gates pass;
+9. the fresh official FAPI-CIBA OIDF run passes and its run/job evidence is recorded;
+10. all three M6 roadmap tasks and the status summary are updated only after the evidence above exists.
