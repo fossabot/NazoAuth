@@ -39,8 +39,9 @@ The accepted request and generated response algorithms are:
 - `rsa-v1_5-sha256` with an RSA public key of at least 2048 bits;
 - `ecdsa-p256-sha256` with a P-256 public key.
 
-Private JWK members, a JWK `use` other than the string `sig`,
-non-verification or conflicting `key_ops`, unsupported curves, key/alg
+Private JWK members, a JWK `use` other than the string `sig`, any present
+`key_ops` value other than the exact one-element string array `["verify"]`,
+unsupported curves, key/alg
 mismatch, ambiguous fields or keys, malformed structured fields, missing
 required covered components, invalid body digests, stale/future creation times,
 and replay all fail closed. The required profile components are validated as a
@@ -51,6 +52,11 @@ status, physical response digest, final `Content-Type` and
 semantic request digest when present, and the exact received request
 `Signature-Input` and `Signature` fields. Signing or replay-store failure cannot
 downgrade to an unsigned success, and external signer stderr is not logged.
+Reserved `Signature` and `Signature-Input` fields cannot be selected as extras,
+preventing self-referential signature bases. The server captures safe request
+header context once per request using lowercase unique names and valid
+control-free text; ambiguous or non-text values are unavailable to component
+reconstruction and therefore fail closed if selected.
 
 ## M8-02: evidence and conformance status
 
@@ -68,7 +74,9 @@ client verification of the server signature and request binding, tampered
 method/URI/Authorization/DPoP/body, tampered signed response `Content-Type` and
 `X-Fapi-Interaction-Id`, stale and future creation times, replay, wrong key,
 wrong client, and the unsigned legacy path on a separately started default-off
-server. The executable registry contains 17 exact HTTP-signature cases. Test
+server. The matrix also exercises a successful request covering `Content-Type`
+and an idempotency header plus rejection after that extra field is changed.
+The executable registry contains 19 exact HTTP-signature cases. Test
 keys are generated in memory. No credential is accepted through command-line
 arguments or printed in output.
 
