@@ -32,8 +32,8 @@ official OIDF conformance-suite release.
 - Correct NazoAuthWeb from “BFF” to same-origin authorization-server frontend;
   explain why the new BFF cookie-prefix SHOULD is not a NazoAuth runtime
   requirement.
-- Update Grant Management to `oauth-v2-grant-management-03`, Second
-  Implementer's Draft.
+- Update Grant Management to the `oauth-v2-grant-management-03` working draft
+  and distinguish it from the approved `ID1` Implementer's Draft snapshot.
 - Ensure active Client Attestation and Transaction Token records consistently
   use `-10` and `-09`.
 - Distinguish historical OIDF evidence from the new `v5.2.0` baseline.
@@ -56,4 +56,3 @@ official OIDF conformance-suite release.
 - Request the official OIDF matrix for the exact deployed head.
 - After official OIDF and all PR checks pass, merge to `main` and verify the
   merged/deployed commit.
-

@@ -67,8 +67,9 @@ drift automatically.
 ## Known corrections
 
 - Browser-Based Applications: `-26` to `-27`, published 2026-07-06.
-- Grant Management: old `fapi-grant-management-01` naming to
-  `oauth-v2-grant-management-03`, Second Implementer's Draft.
+- Grant Management: old `fapi-grant-management-01` naming to the current
+  `oauth-v2-grant-management-03` working draft; its stable `ID1` snapshot was
+  approved as an Implementer's Draft.
 - OIDF conformance-suite default: old commit to `release-v5.2.0` at
   `dee9a25160e789f0f80517674693ef7989ab9fa1`.
 - Active candidate records must consistently use Client Attestation `-10` and
@@ -89,4 +90,3 @@ The change is accepted only after:
 - the deployed Hostinger instance passes the local 19 + Front-Channel Logout
   + Session Management matrix using conformance-suite `v5.2.0`; and
 - the exact correction commit passes the official OIDF workflow and PR checks.
-
