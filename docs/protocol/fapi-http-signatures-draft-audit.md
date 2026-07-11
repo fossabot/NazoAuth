@@ -57,8 +57,9 @@ fixed Ed25519 wire vector only to exercise the deployed HTTP boundary; it is
 guarded by a syntax/source-policy check and is not an independent
 cryptographic truth source.
 
-The real-HTTP matrix covers signed GET and POST, client verification of the
-server signature and request binding, tampered method/URI/Authorization/DPoP/
+The real-HTTP matrix covers signed GET and POST, a successful DPoP-bound
+resource request whose HTTP signature covers the nonce-bearing DPoP proof,
+client verification of the server signature and request binding, tampered method/URI/Authorization/DPoP/
 body, stale and future creation times, replay, wrong key, wrong client, and the
 unsigned legacy path on a separately started default-off server. Test keys are
 generated in memory. No credential is accepted through command-line arguments
