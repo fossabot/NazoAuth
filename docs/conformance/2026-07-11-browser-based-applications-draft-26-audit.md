@@ -31,8 +31,9 @@ Primary source:
 - <https://datatracker.ietf.org/doc/draft-ietf-oauth-browser-based-apps/26/>
 
 Coordinated NazoAuthWeb evidence is pinned to commit
-`304906b30340a735580edd18adb90e567c5a5f3d`. The corresponding PR URL must be
-added before either coordinated PR is marked ready.
+`304906b30340a735580edd18adb90e567c5a5f3d`, reviewed in
+<https://github.com/nazozero/NazoAuthWeb/pull/3>. The coordinated server change
+is <https://github.com/nazozero/NazoAuth/pull/53>.
 
 ## Requirement and evidence matrix
 
