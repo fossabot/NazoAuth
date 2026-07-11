@@ -332,12 +332,12 @@ cargo test --locked session --lib
 
 优先任务：
 
-- [ ] **M6-01：补齐 CIBA poll mode 的产品边界**
+- [x] **M6-01：补齐 CIBA poll mode 的产品边界**
   - 用户确认 UI、审计、错误语义、token binding、interval/slow_down 和 auth_req_id lifecycle 必须完整。
-- [ ] **M6-02：隔离 FAPI-CIBA 与内部 `fapi2-ciba`**
+- [x] **M6-02：隔离 FAPI-CIBA 与内部 `fapi2-ciba`**
   - `fapi-ciba-id1-plain-private-key-jwt-poll` 保持官方 FAPI-CIBA 兼容 profile。
   - `fapi2-ciba` 只声明为内部强化 profile，不在 OIDF/README 中作为官方标准广告。
-- [ ] **M6-03：保持 CIBA metadata truth**
+- [x] **M6-03：保持 CIBA metadata truth**
   - 只有 `ENABLE_CIBA=true` 且 client 注册 CIBA grant 时才广告和执行。
   - 不把 authorization-code-only 的 PAR、PKCE、`response_type=code` 要求套用到 CIBA。
 
@@ -409,11 +409,11 @@ cargo test --locked well_known --lib
 | --- | --- |
 | 已具备的 OP/AS 基线 | BP-001 到 BP-028 已作为当前基础能力维护；TP-001 到 TP-008 已作为精确测试包维护。 |
 | Public OP/AS 基线硬化 | M1 / BP-029 已完成；后续新增 endpoint 必须复用同等 CORS、cookie/session、CSRF、rate limit、日志脱敏和错误语义门禁。 |
-| 当前优先缺口 | M5 外部第三方登录是下一阶段主线；M3/M4 已收口为默认关闭、profile-scoped 或 deferred-by-design 的明确边界。 |
+| 当前优先缺口 | M6 已完成；M7 加密响应与 M8 watchlist 审计是后续阶段。 |
 | FAPI2 / Message Signing | M2 已完成；后续新增 FAPI / Message Signing 行为必须继续保持 profile-scoped metadata truth 与负向测试。 |
 | DCR / DCRM | M3 已完成；NI-004 / NI-005 以 default-closed DCR/DCRM、管理凭据轮换、非秘密审计事件和 onboarding 文档维护。 |
 | Token trust | M4 已完成；NI-003 是 bounded local Token Exchange，NI-006 是第三方 JWT bearer trust 设计完成且实现 deferred，外部 issuer trust 不属于当前默认能力。 |
-| CIBA | NI-007 部分完成 / profile-scoped；官方 FAPI-CIBA 兼容 profile 与内部 `fapi2-ciba` 必须隔离。 |
+| CIBA | M6 已完成；官方 FAPI-CIBA poll profile 与内部 `fapi2-ciba` 已隔离，状态生命周期、并发轮询、审计提交点和 metadata truth 已通过本地与官方全矩阵回归。 |
 | 外部第三方登录 | M5 已完成为配置驱动的热插拔 provider registry；外部 OIDC、OAuth2 social、SAML gateway、非敏感 admin onboarding 和本地 session 边界已实现。 |
 | 非目标 | NI-010 OpenID Federation 当前不实现；第三方登录不依赖 OpenID Federation。 |
 | 可选未来项 | NI-012、NI-013、NI-014、NI-015 和 M8 watchlist 项按需求进入后续路线。 |
