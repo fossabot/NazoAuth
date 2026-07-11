@@ -39,13 +39,18 @@ The accepted request and generated response algorithms are:
 - `rsa-v1_5-sha256` with an RSA public key of at least 2048 bits;
 - `ecdsa-p256-sha256` with a P-256 public key.
 
-Private JWK members, non-verification `key_ops`, unsupported curves, key/alg
+Private JWK members, a JWK `use` other than the string `sig`,
+non-verification or conflicting `key_ops`, unsupported curves, key/alg
 mismatch, ambiguous fields or keys, malformed structured fields, missing
-covered components, invalid body digests, stale/future creation times, and
-replay all fail closed. Responses cover status, physical response digest,
-request method and target URI, the semantic request digest when present, and
-the exact received request `Signature-Input` and `Signature` fields. Signing or
-replay-store failure cannot downgrade to an unsigned success.
+required covered components, invalid body digests, stale/future creation times,
+and replay all fail closed. The required profile components are validated as a
+set while safe, unique ordinary header components may be selected explicitly
+and are reconstructed in received RFC 9421 identifier order. Responses cover
+status, physical response digest, final `Content-Type` and
+`X-Fapi-Interaction-Id` values when present, request method and target URI, the
+semantic request digest when present, and the exact received request
+`Signature-Input` and `Signature` fields. Signing or replay-store failure cannot
+downgrade to an unsigned success, and external signer stderr is not logged.
 
 ## M8-02: evidence and conformance status
 
@@ -59,11 +64,13 @@ cryptographic truth source.
 
 The real-HTTP matrix covers signed GET and POST, a successful DPoP-bound
 resource request whose HTTP signature covers the nonce-bearing DPoP proof,
-client verification of the server signature and request binding, tampered method/URI/Authorization/DPoP/
-body, stale and future creation times, replay, wrong key, wrong client, and the
-unsigned legacy path on a separately started default-off server. Test keys are
-generated in memory. No credential is accepted through command-line arguments
-or printed in output.
+client verification of the server signature and request binding, tampered
+method/URI/Authorization/DPoP/body, tampered signed response `Content-Type` and
+`X-Fapi-Interaction-Id`, stale and future creation times, replay, wrong key,
+wrong client, and the unsigned legacy path on a separately started default-off
+server. The executable registry contains 17 exact HTTP-signature cases. Test
+keys are generated in memory. No credential is accepted through command-line
+arguments or printed in output.
 
 The inspected OIDF conformance suite has no dedicated FAPI HTTP Signatures
 plan. These local tests are implementation evidence, not OIDF certification.
