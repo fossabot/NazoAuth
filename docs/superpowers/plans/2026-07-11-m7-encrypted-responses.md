@@ -22,9 +22,9 @@
 - `authorization_encrypted_response_alg`
 - `authorization_encrypted_response_enc`
 
-签名 allowlist 使用服务端已有非对称 JWT 算法集合；禁止 `none` 和 HMAC。JWE 初始策略只允许项目已经验证的 `RSA-OAEP-256` + `A256GCM`。启用加密必须同时存在 alg、enc 和匹配的 `use=enc`、含 `kid` 的 RSA 公钥；JWK Set 不得包含私钥或对称密钥。
+签名 allowlist 使用当前 Keyset 快照中实际可签名的非对称 JWT 算法集合；禁止 `none` 和 HMAC。活跃签名后端与已加载的本地辅助签名密钥共同构成该集合，Discovery、注册校验和签发必须读取同一快照，不得在请求处理中重新从磁盘推导另一组能力。JWE 初始策略只允许项目已经验证的 `RSA-OAEP-256` + `A256GCM`。启用加密必须同时存在 alg、enc，并且每个配置的 alg 必须且只能匹配一个 `use=enc`、含 `kid` 的 RSA 公钥；JWK Set 不得包含私钥或对称密钥。
 
-字段必须贯穿迁移、Diesel schema、`ClientRow`、管理端 create/patch/detail 与 DCR/DCRM create/read/update。任何入口都复用同一 `validate_client_metadata` 规则。
+字段必须贯穿迁移、Diesel schema、`ClientRow`、管理端 create/patch/detail 与 DCR/DCRM create/read/update。DCR POST 以及 DCRM GET/PUT 响应必须回显全部已配置字段，使 GET 表示在移除服务端管理字段后可安全用于 PUT，不得静默清除响应保护策略。任何入口都复用同一 `validate_client_metadata` 规则。
 
 ## 响应语义
 
@@ -48,7 +48,7 @@
 
 ## Discovery truth
 
-只有代码和密钥策略实际支持时才发布：
+只有当前 Keyset 快照实际可签名或代码与密钥策略实际支持时才发布：
 
 - `userinfo_signing_alg_values_supported`
 - `userinfo_encryption_alg_values_supported`
@@ -56,7 +56,7 @@
 - `authorization_encryption_alg_values_supported`
 - `authorization_encryption_enc_values_supported`
 
-现有 `authorization_signing_alg_values_supported` 继续来自活跃签名事实源。负向测试必须证明禁用/不可用能力不会被误报。
+`userinfo_signing_alg_values_supported` 与 `authorization_signing_alg_values_supported` 使用同一运行时可签名算法集合；注册校验只接受该集合，签发直接使用快照中已经加载并验证的密钥材料。负向测试必须证明只有公钥、已退役、非本地辅助或其他不可用能力不会被误报或接受注册。
 
 ## 测试顺序
 
