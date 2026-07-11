@@ -44,7 +44,7 @@ OAuth 2.1 draft / OIDC / FAPI 2.0 / FAPI-CIBA / CIBA 相关能力，并同时支
 | OAuth 安全基线 | RFC 9700 OAuth 2.0 Security BCP；OAuth 2.1 仍是 `draft-ietf-oauth-v2-1-15`。 | 以 RFC 9700 和 OAuth 2.1 草案方向作为默认安全约束；不得声明 OAuth 2.1 final RFC 合规。 |
 | FAPI 2.0 | FAPI 2.0 Security Profile Final；FAPI 2.0 Message Signing Final。 | 作为高价值 API 主线；Message Signing 选项单独 gating。 |
 | OIDC | Core、Discovery、DCR、RP-Initiated Logout、Back-Channel Logout、Front-Channel Logout、Session Management 等 OIDF 规范。 | 我们作为 OP 时只广告已实现能力；我们作为 RP 时通过 provider adapter 接入外部登录。 |
-| CIBA / FAPI-CIBA | OpenID Connect CIBA Core 1.0 为 Final；FAPI-CIBA 仍按官方 Draft-02 兼容 profile 处理。 | CIBA 默认关闭；FAPI-CIBA 做兼容 profile；`fapi2-ciba` 只表示内部强化 profile。 |
+| CIBA / FAPI-CIBA | OpenID Connect CIBA Core 1.0 为 Final；已实现的 FAPI-CIBA 仍是 ID1 / Draft-02 兼容 profile，当前 working draft 已为 `fapi-ciba-03`（2026-06-26）。 | CIBA 默认关闭；FAPI-CIBA 做 ID1 兼容 profile；`fapi2-ciba` 只表示内部强化 profile；采用 working draft 前必须单独做 delta 审计。 |
 | OpenID Federation | OpenID Federation 1.1 与 OpenID Federation for OpenID Connect 1.1 是当前规范线。 | 当前非目标；第三方登录不依赖 OpenID Federation 信任链。 |
 | Browser-based apps | OAuth 2.0 for Browser-Based Applications 仍是 draft。 | 默认偏向 BFF/same-site session；纯 SPA token storage 是产品/部署边界。 |
 | 新兴草案 | Attestation-Based Client Authentication、Transaction Tokens、Grant Management、OpenID4VCI/VP、HTTP message signatures 等。 | 进入 watchlist；没有明确产品需求、威胁模型、metadata gating 和测试前不实现。 |
@@ -386,7 +386,7 @@ cargo test --locked well_known --lib
 
 - NI-014 FAPI / HTTP message signatures。
 - NI-015 RFC 9865 cursor pagination / RFC 9967 SCIM Security Event Tokens 与异步完成事件。
-- OAuth 2.0 for Browser-Based Applications draft-26 预发布审计，以及最终 RFC 发布后的差异审计。
+- OAuth 2.0 for Browser-Based Applications draft-27 预发布审计，以及最终 RFC 发布后的差异审计。
 - OAuth 2.0 Attestation-Based Client Authentication。
 - Transaction Tokens。
 - Grant Management。
@@ -405,8 +405,8 @@ M8 的完成表示三项进入实现路线的治理门禁已经审计并形成
 [`2026-07-11-m8-watchlist-governance.md`](../conformance/2026-07-11-m8-watchlist-governance.md)
 证据，不表示所有候选协议已经实现或通过认证。后续独立设计已完成 RFC 9865
 SCIM forward cursor pagination 的本地实现与负向测试；OpenID4VCI / OpenID4VP
-需要单独产品立项。Browser-Based Applications draft-26 已完成预发布安全审计，
-NazoAuthWeb 保持 same-origin session/BFF，第三方浏览器应用保持 public code + S256
+需要单独产品立项。Browser-Based Applications draft-27 已完成预发布安全审计，
+NazoAuthWeb 保持授权服务器同源前端与 server-managed session 边界（不是 BFF），第三方浏览器应用保持 public code + S256
 PKCE；最终 RFC 发布后仍必须执行差异审计。其余候选项继续 deferred，直到各自证据记录中的 re-entry 条件满足。
 
 ## 当前状态摘要
@@ -417,7 +417,7 @@ PKCE；最终 RFC 发布后仍必须执行差异审计。其余候选项继续 d
 | --- | --- |
 | 已具备的 OP/AS 基线 | BP-001 到 BP-028 已作为当前基础能力维护；TP-001 到 TP-008 已作为精确测试包维护。 |
 | Public OP/AS 基线硬化 | M1 / BP-029 已完成；后续新增 endpoint 必须复用同等 CORS、cookie/session、CSRF、rate limit、日志脱敏和错误语义门禁。 |
-| 当前优先缺口 | M8 治理门禁、RFC 9865 bounded SCIM cursor pagination 与 Browser-Based Applications draft-26 预发布审计已完成；Browser 最终 RFC 差异审计及其余候选项保持 deferred 或等待单独产品立项。 |
+| 当前优先缺口 | M8 治理门禁、RFC 9865 bounded SCIM cursor pagination 与 Browser-Based Applications draft-27 预发布审计已完成；Browser 最终 RFC 差异审计及其余候选项保持 deferred 或等待单独产品立项。 |
 | FAPI2 / Message Signing | M2 已完成；后续新增 FAPI / Message Signing 行为必须继续保持 profile-scoped metadata truth 与负向测试。 |
 | DCR / DCRM | M3 已完成；NI-004 / NI-005 以 default-closed DCR/DCRM、管理凭据轮换、非秘密审计事件和 onboarding 文档维护。 |
 | Token trust | M4 已完成；NI-003 是 bounded local Token Exchange，NI-006 是第三方 JWT bearer trust 设计完成且实现 deferred，外部 issuer trust 不属于当前默认能力。 |
