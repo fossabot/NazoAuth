@@ -70,4 +70,3 @@ After an RFC number is assigned, compare the final RFC against draft 27,
 re-audit applicable AS and first-party frontend requirements, inspect the then
 latest conformance suite, and update claims only after concrete deltas pass
 negative and regression tests.
-
