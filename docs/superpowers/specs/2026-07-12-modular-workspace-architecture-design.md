@@ -106,6 +106,7 @@ Cargo.toml
 Cargo.lock
 rust-toolchain.toml
 crates/
+  runtime-modules/
   auth/
   identity/
   resource-server/
@@ -161,9 +162,8 @@ facade, or orchestrator crate is inserted.
 It must not depend on Actix, Diesel, diesel-async, Fred, PostgreSQL schema or
 rows, server configuration loading, `HttpRequest`, or `HttpResponse`.
 
-Auth also owns the concrete runtime RFC module registry because module
-dependencies, draining rules, and metadata capabilities are protocol policy.
-The server constructs it; HTTP reads its immutable snapshots.
+Auth consumes the active capability snapshot for protocol admission and
+metadata, but does not own cross-domain module lifecycle.
 
 ### 6.3 `nazo-resource-server`
 
@@ -179,7 +179,20 @@ The historical Tower/Axum and Tonic adapters, tests, documentation, exports,
 and direct `tower`/`tonic` dependencies are deleted. No compatibility feature
 flag is retained.
 
-### 6.4 `nazo-http-signatures`
+### 6.4 `nazo-runtime-modules`
+
+Owns the cross-domain runtime capability state machine: `ModuleId`, tri-state
+desired configuration, actual state, dependency graph, revision-bound
+transitions, disable policies, immutable snapshots, request leases, drain
+coordination, audit event types, and the desired/actual-state repository port.
+
+It depends on no auth, identity, Actix, Diesel, Fred, or concrete module
+implementation. Auth, identity, and HTTP consume its small public state API.
+The server registers the fixed built-in module catalog and supplies concrete
+activation/drain callbacks only where a module has a real lifecycle. This is a
+cross-domain security/failure boundary, not a generic plugin platform.
+
+### 6.5 `nazo-http-signatures`
 
 Owns reusable, framework-neutral HTTP Message Signatures, Structured Fields,
 Content-Digest, canonicalization, signing-base construction, and verification
@@ -189,7 +202,7 @@ It contains no Authorization Server/FAPI profile policy. `nazo-auth` selects
 when and how the primitive is required. `nazo-key-management` supplies the
 actual signing implementation where a message signature uses managed keys.
 
-### 6.5 `nazo-key-management`
+### 6.6 `nazo-key-management`
 
 Owns key generation, lifecycle states, prepublish/active/grace/retired
 transitions, rotation, JWKS material, local signing and verification, external-
@@ -202,7 +215,7 @@ depends on auth. ID tokens, access tokens, JARM, logout tokens, and HTTP message
 signatures use explicit signing purposes; a generic unscoped key handle may not
 silently authorize every use.
 
-### 6.6 `nazo-postgres`
+### 6.7 `nazo-postgres`
 
 Owns Diesel schema, pool, rows, SQL, repository implementations, migrations,
 transactions, and explicit row-to-domain conversion. Database rows never leave
@@ -212,7 +225,7 @@ Required multi-write atomicity uses one PostgreSQL transaction. Existing
 migrations remain byte-for-byte unchanged. The runtime-module desired-state
 addition receives a new migration rather than editing history.
 
-### 6.7 `nazo-valkey`
+### 6.8 `nazo-valkey`
 
 Owns Fred, connection management, key construction, serialization records,
 TTLs, Lua, replay/session/short-lived-state storage, rate-limit counters, and
@@ -224,7 +237,7 @@ nonce consumption timing, session rotation permission, and RFC activation are
 owned by auth or identity. Valkey executes storage operations requested by
 those policies.
 
-### 6.8 `nazo-http-actix`
+### 6.9 `nazo-http-actix`
 
 Owns routes, extractors, form/query/header/cookie parsing, CORS, middleware,
 proxy-derived context, domain/application-error presentation, Actix resource-
@@ -243,7 +256,7 @@ parse request
 
 It does not depend directly on Diesel or Fred.
 
-### 6.9 `nazo-server`
+### 6.10 `nazo-server`
 
 Is only the composition root: configuration loading/validation, focused
 settings construction, concrete adapter initialization, identity/auth/resource
@@ -267,21 +280,24 @@ focused service and, when required, the runtime snapshot handle.
 ## 7. Exact Cargo Dependency Direction
 
 ```text
-nazo-auth            -> nazo-identity, nazo-http-signatures
-nazo-postgres        -> nazo-auth, nazo-identity
+nazo-auth            -> nazo-identity, nazo-http-signatures,
+                        nazo-runtime-modules
+nazo-identity        -> nazo-runtime-modules
+nazo-postgres        -> nazo-auth, nazo-identity, nazo-runtime-modules
 nazo-valkey          -> nazo-auth, nazo-identity
 nazo-key-management  -> nazo-auth
-nazo-http-actix      -> nazo-auth, nazo-identity, nazo-resource-server
+nazo-http-actix      -> nazo-auth, nazo-identity, nazo-resource-server,
+                        nazo-runtime-modules
 nazo-server          -> all concrete crates required for composition
 ```
 
 `nazo-http-signatures` is used only by crates that need its primitive. The
 resource-server has no auth or identity edge.
 
-Forbidden edges include identity to auth, resource-server to auth/identity,
-auth to Actix/PostgreSQL/Valkey, and http-actix to Diesel/Fred. Circular
-dependencies, cross-crate glob re-exports, and workspace-wide preludes are
-forbidden.
+Forbidden edges include runtime-modules to any domain or adapter, identity to
+auth, resource-server to auth/identity, auth to Actix/PostgreSQL/Valkey, and
+http-actix to Diesel/Fred. Circular dependencies, cross-crate glob re-exports,
+and workspace-wide preludes are forbidden.
 
 ## 8. Shortest Request and Error Flow
 
@@ -304,6 +320,15 @@ Actix handler
 -> IdentityRepository
 -> AuthService result
 -> Actix presenter
+```
+
+The management path is equally direct:
+
+```text
+Actix admin handler
+-> RuntimeModuleRegistry
+-> DesiredStateRepository
+-> 202 presenter
 ```
 
 No Controller, Facade, Manager, UseCase wrapper, application orchestrator,
@@ -379,7 +404,7 @@ disabled while that profile is active.
 
 ### 10.2 Concrete Registry, Not a Plugin Platform
 
-`nazo-auth` contains one concrete `RuntimeModuleRegistry` with:
+`nazo-runtime-modules` contains one concrete `RuntimeModuleRegistry` with:
 
 ```text
 ModuleId
@@ -398,18 +423,43 @@ An `ArcSwap`-style immutable snapshot lets requests load one snapshot without a
 long-held lock. A started request safely retains its old snapshot; new requests
 observe the newly published state.
 
+Every asynchronous transition carries an immutable `(module_id, revision)`
+token. Only one transition task per module executes at a time. After every
+asynchronous wait and immediately before publishing a snapshot, beginning or
+completing a drain, and persisting final actual state, the task revalidates that
+its revision is still the latest resolved desired revision. Snapshot replacement
+uses compare-and-swap against the expected revision. Actual-state writes use
+conditional updates bound to the same transition revision. A stale task performs
+no further side effect, emits `StaleTransitionDiscarded`, and yields to the
+newest desired state; an old transition can never overwrite newer configuration.
+
 ### 10.3 Desired State, Actual State, and Management API
 
-Desired state is durable PostgreSQL data. A new additive migration creates:
+Desired mode is durable PostgreSQL data and has exactly three values:
 
-- `runtime_module_desired_states`, keyed by `module_id`, with desired enabled
-  state, optimistic revision, actor, reason, and update time;
-- `runtime_module_state_events`, an append-only audit trail containing actor,
-  reason, previous state, requested state, revision, and timestamp.
+```text
+inherit | enabled | disabled
+```
 
-When no persisted override exists, existing configuration flags determine the
-desired state, preserving current startup behavior. An override wins until an
-administrator explicitly resets it to configuration default.
+`inherit` resolves from the existing configuration flag on every process
+startup/reconciliation. `enabled` and `disabled` are explicit persisted
+overrides. The API returns both desired mode and its currently resolved boolean
+value so the frontend never conflates inheritance with an explicit choice.
+
+A new additive migration creates:
+
+- `runtime_module_desired_states`, keyed by `module_id`, with desired mode,
+  optimistic revision, actor, reason, and update time;
+- `runtime_module_instance_states`, keyed by instance and module, with actual
+  state, transition revision, applied revision, drain deadline, redacted error
+  code, and update time;
+- `runtime_module_state_events`, an append-only audit trail containing event
+  type, instance where applicable, actor where applicable, reason, before/after
+  state, revision, redacted outcome/error code, and timestamp.
+
+When no row exists it is equivalent to `inherit`, preserving current startup
+behavior. Selecting `inherit` explicitly removes any semantic override while
+retaining an auditable revision and event.
 
 The existing same-origin management frontend controls modules through these
 new backend routes:
@@ -425,8 +475,20 @@ Read routes require an active administrator with `admin_level >= 2`. The PATCH
 route additionally requires the existing CSRF protection and a session whose
 `amr` contains `mfa` with `auth_time` no more than five minutes old. The step-up
 route verifies the administrator's configured TOTP or backup code through the
-identity service, atomically rotates the session/CSRF token, and updates
-`auth_time`/`amr`; it never receives or returns module state.
+identity service. Step-up attempts are rate-limited by administrator and trusted
+client-IP dimensions and fail closed if the rate-limit store is unavailable.
+The existing PostgreSQL conditional `last_used_step` update prevents TOTP
+replay, and backup codes are consumed with `used_at IS NULL` in the same
+transactional verification path. Every success, invalid code, replay, rate-
+limit rejection, and backend failure emits a redacted security audit event.
+
+Successful step-up generates the new session identifier and CSRF token before
+one Valkey compare-and-rotate Lua operation stores them together in the new
+session payload and deletes the old session. The HTTP response sets both cookies
+from that result, returns the same CSRF value through the existing safe response
+contract, updates `auth_time`/`amr`, and includes `Cache-Control: no-store`. A
+partially rotated elevated session is never accepted. The endpoint never
+receives or returns module state.
 
 The PATCH body is explicit and concurrency safe:
 
@@ -440,11 +502,22 @@ The PATCH body is explicit and concurrency safe:
 ```
 
 The authenticated user identity supplies the audit actor; the client cannot
-choose it. Reason is required and bounded. The auth service validates module
-identity, dependency/cascade rules, and transition legality, then the
+choose it. Reason is required and bounded. The runtime-module service validates
+module identity, dependency/cascade rules, and transition legality, then the
 PostgreSQL adapter applies desired state and the audit event in one compare-
-and-swap transaction. Repeating the same desired state is idempotent; a stale
-revision returns a typed conflict mapped to HTTP 409.
+revision returns a typed conflict mapped to HTTP 409. `desired_state` accepts
+only `inherit`, `enabled`, or `disabled`.
+
+An idempotent request for the already selected mode keeps the revision stable,
+does not start a transition, and records `DesiredStateChanged` with identical
+before/after values plus a redacted `noop` outcome so the management request is
+still auditable.
+
+PATCH changes desired state only. It writes `DesiredStateChanged`, wakes the
+local reconciler, and returns `202 Accepted` with the accepted desired mode,
+new revision, current actual state, and status resource URL. It never claims
+that enablement, disablement, or draining has completed. GET responses and all
+management mutation responses use `Cache-Control: no-store`.
 
 The list response exposes only operational state needed by the UI: module id,
 description, desired source/state, actual state, revision, dependencies,
@@ -453,6 +526,25 @@ failure status. The events response is paginated and contains actor identity,
 reason, before/after state, revision, and timestamp, never secrets or raw
 configuration.
 
+The audit event type is closed and exhaustive:
+
+```text
+DesiredStateChanged
+TransitionStarted
+TransitionCompleted
+TransitionFailed
+DrainStarted
+DrainCompleted
+StaleTransitionDiscarded
+```
+
+The management request produces `DesiredStateChanged`. Reconcilers produce the
+transition and drain events with instance identity and the bound revision.
+`TransitionCompleted` is written only after the matching snapshot is published
+and final actual state is conditionally persisted; `TransitionFailed` stores a
+stable redacted error code. A completed drain emits `DrainCompleted` before the
+matching `TransitionCompleted`.
+
 Existing administrator-level mutation is hardened with an explicit hierarchy:
 an administrator cannot grant a level at or above their own, alter an
 administrator at or above their own level, or lower/disable their own account.
@@ -460,11 +552,13 @@ Without this rule a level-1 administrator could self-elevate and bypass the
 module-control boundary. The behavior change is security-motivated and receives
 negative authorization tests and documentation.
 
-Each server instance periodically reconciles desired state in dependency order
-and records its actual in-memory state and revision in metrics/logs. The current
-deployment is single-instance. In a future multi-instance deployment, rollout
-verification must wait until every instance reports the same desired revision;
-within each instance, metadata and behavior switch atomically.
+Each server instance periodically reconciles desired state in dependency order,
+while the instance that accepted PATCH also wakes its reconciler immediately.
+Actual state/revision is persisted per instance and exposed in metrics/logs.
+The current deployment is single-instance. In a future multi-instance
+deployment, rollout verification waits until every instance reports the same
+resolved desired revision; within each instance, metadata and behavior switch
+atomically.
 
 ### 10.4 Enable and Disable Semantics
 
@@ -498,17 +592,43 @@ Static Actix routes remain registered. A handler loads the snapshot and returns
 the same protocol-level disabled response captured from the current feature-
 flag behavior. The router is never rebuilt at runtime.
 
-Stateful rules are explicit:
+Every `ModuleId` has one explicit close policy:
 
-- CIBA and Device stop new authorization requests while existing identifiers
-  may be verified/polled until their recorded TTL expires;
-- DCR stops new registrations while management of already issued registration
-  access tokens drains according to their existing validity;
-- JARM and authorization details stop new authorization transactions while
-  stored in-flight transactions complete with the policy recorded at creation;
-- SCIM, Token Exchange, JWT Bearer, Native SSO, session management, and HTTP
-  signatures allow already executing requests to finish but reject new work;
-- cleanup needed by legacy state remains active until that state expires.
+```rust
+enum DisablePolicy {
+    Immediate,
+    FinishExecutingRequests,
+    DrainStoredTransactions { max_duration: Duration },
+    NotRuntimeDisableable,
+}
+```
+
+Durations are resolved from validated focused settings when the module catalog
+is constructed; they are not duplicated magic constants.
+
+| ModuleId | Disable policy | Required behavior |
+|---|---|---|
+| `DeviceAuthorization` | `DrainStoredTransactions { DEVICE_AUTHORIZATION_TTL_SECONDS }` | Stop creating device codes; verification and polling for existing codes continue until their recorded expiry. |
+| `TokenExchange` | `FinishExecutingRequests` | Remove new admission and wait for request leases already executing. |
+| `JwtBearerGrant` | `FinishExecutingRequests` | Remove new admission and wait for request leases already executing. |
+| `Ciba` | `DrainStoredTransactions { CIBA_AUTH_REQ_ID_TTL_SECONDS }` | Stop issuing `auth_req_id`; verification and polling continue until recorded expiry; retention cleanup remains active. |
+| `DynamicClientRegistration` | `FinishExecutingRequests` | Stop all newly admitted registration-management calls after current requests finish. Existing clients and credentials remain valid. |
+| `RequestObjects` | `FinishExecutingRequests` | Stop parsing new request objects; already normalized authorization requests no longer depend on the parser, and replay records expire normally. |
+| `Jarm` | `DrainStoredTransactions { AUTH_CODE_TTL_SECONDS }` | Stop new JARM authorization transactions; consent transactions that recorded JARM complete or expire. |
+| `AuthorizationDetails` | `DrainStoredTransactions { REFRESH_TOKEN_TTL_SECONDS }` | Stop new RAR input; issued authorization-code/refresh families retain their recorded details until the longest valid family expires. |
+| `HttpMessageSignatures` | `FinishExecutingRequests` | Withdraw new signed-message admission/advertising and let requests holding the old snapshot finish. Active profiles that require it block disablement. |
+| `Scim` | `FinishExecutingRequests` | Stop new SCIM calls and wait for executing synchronization mutations. |
+| `NativeSso` | `DrainStoredTransactions { REFRESH_TOKEN_TTL_SECONDS }` | Stop new native SSO grants/device secrets; existing bound refresh families continue until expiry. |
+| `FrontchannelLogout` | `FinishExecutingRequests` | Remove metadata and new front-channel notification generation; logout requests already holding a snapshot finish. |
+| `SessionManagement` | `DrainStoredTransactions { SESSION_TTL_SECONDS }` | Remove metadata and new session-management admission while existing OIDC sessions may be checked until expiry. |
+
+If implementation evidence shows a listed policy cannot preserve its stated
+invariant, the module is changed to `NotRuntimeDisableable` with a test and UI
+explanation; it is never force-disabled. At a drain deadline, the registry
+verifies that no valid stored transaction remains. A non-empty result becomes
+`TransitionFailed` and stays fail-closed rather than silently discarding state.
+Cleanup required by expired legacy state remains active independently of new
+admission.
 
 Enabling fails if a dependency is unavailable. Disabling a module required by
 an enabled module or active security profile fails unless an explicit,
@@ -517,10 +637,17 @@ enabled.
 
 ### 10.5 NazoAuthWeb Management Experience
 
-`D:\self\NazoAuthWeb` is part of this delivery. Work starts from the latest
-`origin/main`, which already contains the merged Device, CIBA, and browser-
-credential-boundary work. It receives its own branch and coordinated Draft PR,
-cross-linked to the NazoAuth PR.
+The frontend is discovered as the sibling repository named `NazoAuthWeb`; no
+machine-specific absolute path is stored in code, plans, scripts, or docs.
+Before creating its worktree, automation records and verifies the current
+branch/worktree state, requires a clean working tree, verifies remote
+`origin` equal to `https://github.com/nazozero/NazoAuthWeb`, fetches the remote,
+checks that the target branch/worktree does not already exist, and creates
+`codex/runtime-module-admin` from the fetched `origin/main` without changing the
+existing checkout.
+Implementation stops rather than guessing if the sibling, remote, base branch,
+or cleanliness check differs. The frontend branch receives a coordinated Draft
+PR cross-linked to the NazoAuth PR.
 
 The existing `/admin` console gains a Runtime Modules section visible only to
 `admin_level >= 2`. It calls the backend routes directly through the existing
@@ -530,15 +657,20 @@ MFA, desired-state, or audit material in browser storage.
 The page displays desired versus actual state, revision, dependencies,
 dependents, transition/drain status, and redacted failures. Every change
 requires a reason, dependency impact preview, explicit confirmation, and current
-revision. The UI never reports success optimistically; it reloads authoritative
-state. HTTP 409 triggers a visible refresh/conflict flow. A step-up-required
+revision. Desired mode is a three-way `inherit`/`enabled`/`disabled` control,
+with the resolved inherited value shown separately. A `202 Accepted` response
+is rendered only as “change accepted/pending”; the UI never calls it enabled,
+disabled, drained, or complete. Completion appears only after a later GET shows
+a stable actual state with the accepted revision. HTTP 409 triggers a visible
+refresh/conflict flow. A step-up-required
 response opens an MFA dialog, calls the step-up endpoint, then requires a fresh
 confirmation rather than replaying the mutation automatically.
 
 While a module is Starting or Draining the panel polls with bounded backoff and
 stops when stable or when the page is hidden. Failed state is visible without
 leaking configuration or stack traces. Cascade is default-off and requires a
-second explicit dependency summary.
+second explicit dependency summary. The audit view distinguishes management
+intent from transition, drain, failure, and stale-transition execution events.
 
 The current `src/pages/Admin.tsx` exceeds 2,500 lines. Adding another inline
 tab would deepen an existing maintainability problem, so it is split by real UI
@@ -587,6 +719,10 @@ has one narrowly scoped concurrency-safe owner.
 Before moving an implementation, tests record:
 
 - the complete method/route inventory and initial conditional behavior;
+- after formerly conditional routes become statically registered, a per-route
+  disabled-state matrix covering GET, POST, OPTIONS, and other supported or
+  rejected methods, with exact status, headers, body bytes/JSON, content type,
+  CORS headers, security headers, and no-store behavior;
 - the canonical configuration key set, values, defaults, precedence, and
   invalid-input behavior;
 - migration filenames, checksums/order, fresh schema, and upgrade results;
@@ -597,7 +733,12 @@ Before moving an implementation, tests record:
 - CIBA, Device, PAR/JAR/JARM, DPoP, mTLS, userinfo, introspection, DCR, SCIM,
   session, identity, and admin behavior;
 - runtime module transition, dependency, metadata atomicity, drain, audit,
-  restart, idempotency, and concurrent-update behavior.
+  restart, tri-state inheritance, 202/poll semantics, revision revalidation at
+  every asynchronous checkpoint, stale-transition discard, idempotency, and
+  concurrent-update behavior;
+- MFA step-up rate limits, TOTP replay rejection, backup-code single use under
+  concurrency, redacted audit events, atomic session/CSRF rotation, stale
+  session rejection, and `Cache-Control: no-store`.
 
 Tests compare observable values rather than internal paths. Existing coverage
 moves to the owning crate and is not weakened or discarded.
@@ -612,26 +753,29 @@ Commit/migration sequence:
 
 1. add compatibility contracts, workspace lint policy, CI path coverage, and
    exact Rust toolchain pin;
-2. extract the framework-independent resource-server and delete Tower/Tonic;
-3. rename and verify the independent HTTP Signatures crate;
-4. extract key-management and purpose-scoped signing;
-5. extract identity domain/services and SCIM identity logic;
-6. establish auth with the direct identity dependency and move protocol policy;
-7. extract PostgreSQL rows/repositories/transactions and add the new runtime-
-   module desired-state migration;
-8. extract Valkey mechanisms and remove business policy from its boundary;
-9. reduce Actix handlers to parsing, direct calls, and presentation;
-10. replace giant settings/state with focused configuration/services and build
+2. create non-empty `nazo-runtime-modules` with tri-state/revision state-machine
+   behavior, disable policies, snapshot/request-lease primitives, and tests;
+3. extract the framework-independent resource-server and delete Tower/Tonic;
+4. rename and verify the independent HTTP Signatures crate;
+5. extract key-management and purpose-scoped signing;
+6. extract identity domain/services and SCIM identity logic;
+7. establish auth with the direct identity dependency and move protocol policy;
+8. extract PostgreSQL rows/repositories/transactions and add the new runtime-
+   module desired/actual/audit migration;
+9. extract Valkey mechanisms and remove business policy from its boundary;
+10. reduce Actix handlers to parsing, direct calls, and presentation;
+11. replace giant settings/state with focused configuration/services and build
     the server composition root;
-11. implement concrete runtime module snapshots, persistence, privileged Admin
-    API, MFA step-up, dependency validation, drains, and metadata atomicity;
-12. branch NazoAuthWeb from latest `origin/main`, split the giant admin page by
+12. integrate revision-bound transitions, exhaustive audit events, privileged
+    202 Admin API, hardened MFA step-up, drains, and metadata atomicity;
+13. discover and branch the verified NazoAuthWeb sibling, add real component
+    tests, split the giant admin page by
     real responsibility, and implement the module status/audit/control UI;
-13. delete the old Rust root monolith, prelude, glob re-exports, duplicate
+14. delete the old Rust root monolith, prelude, glob re-exports, duplicate
     helpers, dead code, unused dependencies, and obsolete tests;
-14. update both repositories' CI, containers, deployment, configuration,
+15. update both repositories' CI, containers, deployment, configuration,
     architecture, frontend, security, and operations documentation;
-15. run all local gates for both repositories and complete coordinated
+16. run all local gates for both repositories and complete coordinated
     production/conformance acceptance.
 
 After the first compiling boundary and targeted fmt/check/clippy/test pass, push
@@ -673,11 +817,18 @@ concurrency/load, fault-injection, container-build, and local consistency suites
 also run. A failure is root-caused, fixed with a regression test where
 applicable, and rerun.
 
-NazoAuthWeb must freshly pass:
+NazoAuthWeb currently has `package-lock.json`; `package.json` defines `lint`,
+`build`, and `test`, but the present `test` script only composes lint/build and
+the repository has no test files or test runner. The frontend change therefore
+adds Vitest, jsdom, React Testing Library, and user-event, introduces a real
+`test:unit` script, and updates `test` to run lint, unit tests, and build. The
+lockfile is updated with `npm install`, while clean verification uses the actual
+lockfile and resulting scripts:
 
 ```text
 npm ci
 npm run lint
+npm run test:unit
 npm run build
 npm test
 ```
@@ -729,9 +880,18 @@ Completion requires all of the following:
   support layer are gone;
 - normal requests have no forwarding-only abstraction layers;
 - traits, registries, and dynamic dispatch satisfy the rules in this design;
+- `nazo-runtime-modules` is independent of auth, identity, and infrastructure,
+  and owns the cross-domain revision-bound state machine;
 - optional runtime modules activate/drain atomically without metadata drift;
 - desired state persists and all module changes are authorized, audited,
-  idempotent, dependency-checked, and concurrency-safe;
+  idempotent, dependency-checked, tri-state, revision-bound, stale-transition
+  safe, and concurrency-safe;
+- PATCH returns 202 for desired-state acceptance, while actual transition and
+  drain outcomes are recorded by the exhaustive audit event model;
+- every ModuleId has a tested `DisablePolicy` and no unsafe capability can be
+  force-disabled;
+- MFA step-up has rate limits, TOTP replay protection, atomic backup-code use,
+  redacted security audit, atomic session/CSRF rotation, and no-store responses;
 - the NazoAuthWeb administrator UI enforces visibility, reason, confirmation,
   MFA step-up, conflict handling, dependency display, and no credential/state
   persistence in browser storage;
