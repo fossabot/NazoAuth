@@ -28,17 +28,17 @@ evidence for the status table below:
 
 | Area | Code evidence |
 | --- | --- |
-| Authorization Code flow, PKCE S256, refresh tokens, and client credentials | `src/bootstrap/routes.rs`, `src/http/token/dispatch.rs`, `src/http/token/authorization_code.rs`, `src/http/token/refresh.rs`, `src/http/token/client_credentials.rs` |
-| OAuth Authorization Server Metadata and OpenID Provider Configuration | `src/http/well_known.rs` publishes `/.well-known/oauth-authorization-server` and `/.well-known/openid-configuration` metadata |
-| OAuth Protected Resource Metadata | `src/http/well_known.rs` publishes `/.well-known/oauth-protected-resource` and `/.well-known/oauth-protected-resource/fapi/resource`; authorization server metadata lists `protected_resources` |
-| Revocation and introspection | `src/bootstrap/routes.rs`, `src/http/token/revoke.rs`, `src/http/token/introspect.rs` |
-| PAR, JAR, JARM-style JWT authorization responses, and issuer identification | `src/http/authorization/par.rs`, `src/http/authorization/request.rs`, `src/http/well_known.rs` |
-| Resource Indicators and Rich Authorization Requests | `resource`/`authorization_details` handling in `src/http/authorization`, `src/http/token`, and `src/resource_server.rs`, including PAR/request-object inputs and refresh-token resource narrowing |
-| JWT access tokens and resource-server verification | `src/http/token/issue.rs`, `src/resource_server.rs` |
-| DPoP and mTLS sender-constrained tokens | `src/support/dpop.rs`, `src/support/mtls.rs`, `src/http/token/authorization_code.rs`, `src/http/token/client_credentials.rs`, `src/http/fapi_resource.rs` |
-| `private_key_jwt`, mTLS client authentication, and client secret auth methods | `src/http/token/client_auth.rs`, `src/support/oauth.rs`, `src/http/well_known.rs` |
-| OIDC Core code flow, Discovery, UserInfo, RP-Initiated Logout, and Back-Channel Logout | `src/bootstrap/routes.rs`, `src/http/well_known.rs`, `src/http/userinfo.rs`, `src/http/profile/oidc_logout.rs` |
-| FAPI 2.0 Security Profile and Message Signing profile controls | `src/http/well_known.rs`, `src/http/authorization/request.rs`, `src/http/token/dispatch.rs`, FAPI profile tests under `tests/in_source` |
+| Authorization Code flow, PKCE S256, refresh tokens, and client credentials | `crates/server/src/bootstrap/routes.rs`, `crates/server/src/http/token/dispatch.rs`, `crates/server/src/http/token/authorization_code.rs`, `crates/server/src/http/token/refresh.rs`, `crates/server/src/http/token/client_credentials.rs` |
+| OAuth Authorization Server Metadata and OpenID Provider Configuration | `crates/server/src/http/well_known.rs` publishes `/.well-known/oauth-authorization-server` and `/.well-known/openid-configuration` metadata |
+| OAuth Protected Resource Metadata | `crates/server/src/http/well_known.rs` publishes `/.well-known/oauth-protected-resource` and `/.well-known/oauth-protected-resource/fapi/resource`; authorization server metadata lists `protected_resources` |
+| Revocation and introspection | `crates/server/src/bootstrap/routes.rs`, `crates/server/src/http/token/revoke.rs`, `crates/server/src/http/token/introspect.rs` |
+| PAR, JAR, JARM-style JWT authorization responses, and issuer identification | `crates/server/src/http/authorization/par.rs`, `crates/server/src/http/authorization/request.rs`, `crates/server/src/http/well_known.rs` |
+| Resource Indicators and Rich Authorization Requests | `resource`/`authorization_details` handling in `crates/server/src/http/authorization`, `crates/server/src/http/token`, `crates/auth/src/authorization_details.rs`, and `crates/resource-server/src/lib.rs`, including PAR/request-object inputs and refresh-token resource narrowing |
+| JWT access tokens and resource-server verification | `crates/server/src/http/token/issue.rs`, `crates/auth/src/token.rs`, and `crates/resource-server/src/lib.rs` |
+| DPoP and mTLS sender-constrained tokens | `crates/server/src/support/dpop.rs`, `crates/server/src/support/mtls.rs`, `crates/server/src/http/token/authorization_code.rs`, `crates/server/src/http/token/client_credentials.rs`, `crates/server/src/http/fapi_resource.rs`, and `crates/resource-server/src/dpop.rs` |
+| `private_key_jwt`, mTLS client authentication, and client secret auth methods | `crates/server/src/http/token/client_auth.rs`, `crates/server/src/support/oauth.rs`, `crates/server/src/http/well_known.rs` |
+| OIDC Core code flow, Discovery, UserInfo, RP-Initiated Logout, and Back-Channel Logout | `crates/server/src/bootstrap/routes.rs`, `crates/server/src/http/well_known.rs`, `crates/server/src/http/token/userinfo.rs`, `crates/server/src/http/profile/oidc_logout.rs` |
+| FAPI 2.0 Security Profile and Message Signing profile controls | `crates/server/src/http/well_known.rs`, `crates/server/src/http/authorization/request.rs`, `crates/server/src/http/token/dispatch.rs`, FAPI profile tests under `crates/server/tests/in_source` |
 
 ## Backlog
 
