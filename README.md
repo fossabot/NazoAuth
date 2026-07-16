@@ -10,6 +10,7 @@
 [![conformance-security](https://github.com/nazozero/NazoAuth/actions/workflows/conformance-security.yml/badge.svg?branch=main)](https://github.com/nazozero/NazoAuth/actions/workflows/conformance-security.yml)
 [![oidf-conformance-full](https://github.com/nazozero/NazoAuth/actions/workflows/oidf-conformance-full.yml/badge.svg?branch=main)](https://github.com/nazozero/NazoAuth/actions/workflows/oidf-conformance-full.yml)
 [![codecov](https://codecov.io/gh/nazozero/NazoAuth/branch/main/graph/badge.svg)](https://app.codecov.io/gh/nazozero/NazoAuth)
+[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Fnazozero%2FNazoAuth.svg?type=shield)](https://app.fossa.com/projects/git%2Bgithub.com%2Fnazozero%2FNazoAuth?ref=badge_shield)
 
 [中文文档](README.zh-CN.md) · [Documentation](#documentation) · [Quick start](#quick-start) · [Security](SECURITY.md)
 
@@ -300,3 +301,6 @@ Windows coverage runs are documented in
 ## License
 
 AGPL-3.0-or-later. See [LICENSE](LICENSE).
+
+
+[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Fnazozero%2FNazoAuth.svg?type=large)](https://app.fossa.com/projects/git%2Bgithub.com%2Fnazozero%2FNazoAuth?ref=badge_large)
